@@ -1,0 +1,9 @@
+# 生产路径已使用 ultralytics 8.4.70 验证；不要安装 smartBin 根目录内的旧源码包。
+ultralytics==8.4.70
+transformers>=4.44,<6
+torch>=2.2
+torchvision>=0.17
+numpy>=1.26,<3
+Pillow>=10
+opencv-python>=4.8
+
