@@ -391,18 +391,147 @@ def make_scheduler(
     return LambdaLR(optimizer, multiplier)
 
 
+def _degradation_options(config: dict[str, Any] | None) -> dict[str, Any]:
+    config = config or {}
+    nested = config.get("sensor_degradation")
+    return nested if isinstance(nested, dict) else config
+
+
+def _probability(options: dict[str, Any], *names: str, default: float = 0.0) -> float:
+    for name in names:
+        if name in options:
+            return min(max(float(options[name]), 0.0), 1.0)
+    return min(max(default, 0.0), 1.0)
+
+
+def degrade_sensor_grid(
+    sensor_grid: Tensor,
+    config: dict[str, Any] | None = None,
+    *,
+    generator: torch.Generator | None = None,
+) -> dict[str, Tensor]:
+    """Apply software-only sensor degradation for robust training."""
+
+    if sensor_grid.ndim != 4 or tuple(sensor_grid.shape[1:]) != (1, 4, 4):
+        raise ValueError("sensor_grid must have shape [B,1,4,4]")
+    if not torch.isfinite(sensor_grid).all():
+        raise ValueError("sensor_grid contains NaN or infinite values")
+
+    options = _degradation_options(config)
+    clean = sensor_grid.float()
+    batch_size = clean.shape[0]
+    availability = torch.ones(batch_size, 1, device=clean.device, dtype=clean.dtype)
+    if not bool(options.get("enabled", False)):
+        return {
+            "degraded_grid": clean.clone(),
+            "availability": availability,
+            "quality_target": availability.clone(),
+        }
+
+    degraded = clean.clone()
+    sample_shape = (batch_size, 1, 1, 1)
+    rand_kwargs = {"device": clean.device, "dtype": clean.dtype, "generator": generator}
+    active = torch.ones(sample_shape, device=clean.device, dtype=torch.bool)
+
+    missing_mask = (
+        torch.rand(sample_shape, **rand_kwargs)
+        < _probability(options, "missing_probability", "missing_prob")
+    )
+    if bool(missing_mask.any()):
+        degraded = torch.where(missing_mask, torch.zeros_like(degraded), degraded)
+        active = active & ~missing_mask
+        availability = (~missing_mask.view(batch_size, 1)).to(dtype=clean.dtype)
+
+    noise_mask = (
+        torch.rand(sample_shape, **rand_kwargs)
+        < _probability(options, "noise_probability", "noise_prob")
+    ) & active
+    noise_std = max(float(options.get("noise_std", options.get("noise_strength", 0.0))), 0.0)
+    if noise_std > 0.0 and bool(noise_mask.any()):
+        noise = torch.randn(clean.shape, **rand_kwargs) * noise_std
+        degraded = torch.where(noise_mask, degraded + noise, degraded)
+
+    bias_mask = (
+        torch.rand(sample_shape, **rand_kwargs)
+        < _probability(options, "bias_probability", "drift_probability", "bias_prob")
+    ) & active
+    if bool(bias_mask.any()):
+        bias_range = options.get("bias_range")
+        if isinstance(bias_range, (list, tuple)) and len(bias_range) == 2:
+            low, high = float(bias_range[0]), float(bias_range[1])
+            amplitude = torch.rand(sample_shape, **rand_kwargs) * (high - low) + low
+        else:
+            strength = max(
+                float(options.get("bias_strength", options.get("drift_strength", 0.0))),
+                0.0,
+            )
+            min_strength = max(
+                float(options.get("bias_min_strength", strength * 0.5)),
+                0.0,
+            )
+            min_strength = min(min_strength, strength)
+            magnitude = torch.rand(sample_shape, **rand_kwargs) * (
+                strength - min_strength
+            ) + min_strength
+            sign = torch.where(
+                torch.rand(sample_shape, **rand_kwargs) < 0.5,
+                -torch.ones(sample_shape, device=clean.device, dtype=clean.dtype),
+                torch.ones(sample_shape, device=clean.device, dtype=clean.dtype),
+            )
+            amplitude = sign * magnitude
+        coords = torch.linspace(-1.0, 1.0, steps=4, device=clean.device, dtype=clean.dtype)
+        row = coords.view(1, 1, 4, 1)
+        col = coords.view(1, 1, 1, 4)
+        direction = torch.randn((batch_size, 2, 1, 1), **rand_kwargs)
+        direction = direction / direction.norm(dim=1, keepdim=True).clamp_min(1e-6)
+        drift_plane = direction[:, 0:1] * col + direction[:, 1:2] * row
+        drift_plane = drift_plane / drift_plane.abs().amax(
+            dim=(2, 3), keepdim=True
+        ).clamp_min(1e-6)
+        drift = amplitude * drift_plane
+        degraded = torch.where(bias_mask, degraded + drift, degraded)
+
+    stuck_mask = (
+        torch.rand(sample_shape, **rand_kwargs)
+        < _probability(options, "stuck_probability", "stuck_prob")
+    ) & active
+    if bool(stuck_mask.any()):
+        if "stuck_value" in options:
+            stuck_value = torch.full_like(degraded, float(options["stuck_value"]))
+        else:
+            stuck_value = clean[:, :, :1, :1].expand_as(degraded)
+        degraded = torch.where(stuck_mask, stuck_value, degraded)
+
+    degraded = degraded.clamp(0.0, 1.0)
+    quality_scale = max(float(options.get("quality_scale", 0.25)), 1e-6)
+    mean_absolute_change = (degraded - clean).abs().mean(dim=(1, 2, 3), keepdim=False)
+    quality_target = (1.0 - mean_absolute_change.unsqueeze(1) / quality_scale).clamp(
+        0.0, 1.0
+    )
+    quality_target = quality_target * availability
+    return {
+        "degraded_grid": degraded,
+        "availability": availability,
+        "quality_target": quality_target,
+    }
+
+
 def _run_epoch(
     model: nn.Module,
     loader: DataLoader,
     criterion: JointClassificationLoss,
     device: torch.device,
     optimizer: torch.optim.Optimizer | None,
-) -> tuple[float, float]:
+    *,
+    robustness_config: dict[str, Any] | None = None,
+    return_metrics: bool = False,
+) -> tuple[float, float] | tuple[float, float, dict[str, float]]:
     training = optimizer is not None
     model.train(training)
     total_loss = 0.0
     correct = 0
     count = 0
+    component_totals: dict[str, float] = {}
     context = torch.enable_grad if training else torch.no_grad
     with context():
         for batch in loader:
@@ -411,8 +540,35 @@ def _run_epoch(
             labels = batch["label"].to(device, non_blocking=True)
             if training:
                 optimizer.zero_grad(set_to_none=True)
-            logits = model(images, sensors)
-            loss = criterion(logits, labels)
+
+            sensor_encoder = getattr(model, "sensor_encoder", None)
+            if sensor_encoder is not None:
+                with torch.no_grad():
+                    clean_sensor_target = sensor_encoder(sensors).detach()
+                degradation = (
+                    degrade_sensor_grid(sensors, robustness_config)
+                    if training
+                    else degrade_sensor_grid(sensors, {"enabled": False})
+                )
+                logits, aux = model(
+                    images,
+                    degradation["degraded_grid"],
+                    sensor_available=degradation["availability"],
+                    return_aux=True,
+                )
+                loss, components = criterion(
+                    logits,
+                    labels,
+                    aux=aux,
+                    sensor_target=clean_sensor_target,
+                    quality_target=degradation["quality_target"],
+                    reconstruction_mask=torch.ones_like(degradation["availability"]),
+                    return_components=True,
+                )
+            else:
+                logits = model(images, sensors)
+                loss, components = criterion(logits, labels, return_components=True)
+
             if training:
                 loss.backward()
                 optimizer.step()
@@ -420,7 +576,22 @@ def _run_epoch(
             total_loss += float(loss.detach()) * batch_size
             correct += int((logits.argmax(dim=-1) == labels).sum())
             count += batch_size
-    return total_loss / max(count, 1), correct / max(count, 1)
+            for name, value in components.items():
+                component_totals[name] = component_totals.get(name, 0.0) + (
+                    float(value.detach()) * batch_size
+                )
+            if sensor_encoder is not None:
+                for name in ("sensor_reliability", "sensor_consistency"):
+                    component_totals[name] = component_totals.get(name, 0.0) + (
+                        float(aux[name].detach().mean()) * batch_size
+                    )
+
+    average_loss = total_loss / max(count, 1)
+    accuracy = correct / max(count, 1)
+    if not return_metrics:
+        return average_loss, accuracy
+    metrics = {name: value / max(count, 1) for name, value in component_totals.items()}
+    return average_loss, accuracy, metrics
 
 
 def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -472,6 +643,8 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
         focal_weight=float(loss_config.get("focal_weight", 1.0)),
         alpha=loss_config.get("alpha", 0.25),
         gamma=float(loss_config.get("gamma", 2.0)),
+        reconstruction_weight=float(loss_config.get("reconstruction_weight", 0.0)),
+        calibration_weight=float(loss_config.get("calibration_weight", 0.0)),
     ).to(device)
     optimizer = AdamW(
         (parameter for parameter in model.parameters() if parameter.requires_grad),
@@ -489,12 +662,25 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
 
     best_accuracy = -1.0
     history: list[dict[str, float | int]] = []
+    robustness_config = config.get("robustness", {})
     for epoch in range(epochs):
-        train_loss, train_accuracy = _run_epoch(
-            model, train_loader, criterion, device, optimizer
+        train_loss, train_accuracy, train_components = _run_epoch(
+            model,
+            train_loader,
+            criterion,
+            device,
+            optimizer,
+            robustness_config=robustness_config,
+            return_metrics=True,
         )
-        val_loss, val_accuracy = _run_epoch(
-            model, val_loader, criterion, device, None
+        val_loss, val_accuracy, val_components = _run_epoch(
+            model,
+            val_loader,
+            criterion,
+            device,
+            None,
+            robustness_config=robustness_config,
+            return_metrics=True,
         )
         scheduler.step()
         metrics: dict[str, float | int] = {
@@ -505,6 +691,10 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
             "val_accuracy": val_accuracy,
             "learning_rate": optimizer.param_groups[0]["lr"],
         }
+        for name, value in train_components.items():
+            metrics[f"train_{name}"] = value
+        for name, value in val_components.items():
+            metrics[f"val_{name}"] = value
         history.append(metrics)
         print(json.dumps(metrics, ensure_ascii=False))
         checkpoint = {

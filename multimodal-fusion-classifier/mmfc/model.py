@@ -330,8 +330,14 @@ class MultimodalFusionClassifier(nn.Module):
         attention_dim: int = 128,
         attention_heads: int = 8,
         dropout: float = 0.3,
+        film_gamma_init: float = 1.0,
+        film_beta_init: float = 0.1,
         scale_prior: Sequence[float] = (0.3, 0.5, 0.2),
         text_temperature: float = 0.07,
+        sensor_log_variance_min: float = -6.0,
+        sensor_log_variance_max: float = 2.0,
+        sensor_reliability_hidden_dim: int = 32,
+        sensor_reliability_init: float = 0.85,
     ) -> None:
         super().__init__()
         if num_classes < 2:
@@ -342,6 +348,15 @@ class MultimodalFusionClassifier(nn.Module):
             raise ValueError("attention_dim 必须能被 attention_heads 整除")
         if len(scale_prior) != 3 or any(value <= 0 for value in scale_prior):
             raise ValueError("scale_prior 必须包含三个正数")
+
+        if sensor_log_variance_min >= sensor_log_variance_max:
+            raise ValueError("sensor_log_variance_min must be < sensor_log_variance_max")
+        if not 0.0 < sensor_reliability_init < 1.0:
+            raise ValueError("sensor_reliability_init must be in (0,1)")
+        if not math.isfinite(film_gamma_init) or film_gamma_init <= 0.0:
+            raise ValueError("film_gamma_init must be finite and > 0")
+        if not math.isfinite(film_beta_init):
+            raise ValueError("film_beta_init must be finite")
 
         self.num_classes = num_classes
         self.feature_dim = feature_dim
@@ -368,9 +383,51 @@ class MultimodalFusionClassifier(nn.Module):
         self.text_adapter = ModalityAdapter(feature_dim, dropout)
         self.sensor_adapter = ModalityAdapter(feature_dim, dropout)
 
+        self.sensor_log_variance_min = float(sensor_log_variance_min)
+        self.sensor_log_variance_max = float(sensor_log_variance_max)
+        reliability_hidden_dim = max(2, int(sensor_reliability_hidden_dim))
+        sensor_prediction_dim = feature_dim * 2
+        self.sensor_mean_predictor = nn.Sequential(
+            nn.Linear(sensor_prediction_dim, feature_dim),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, feature_dim),
+        )
+        self.sensor_logvar_predictor = nn.Sequential(
+            nn.Linear(sensor_prediction_dim, feature_dim),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, feature_dim),
+        )
+        self.sensor_reliability_predictor = nn.Sequential(
+            nn.Linear(4, reliability_hidden_dim),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(reliability_hidden_dim, 1),
+        )
+        for module in (
+            self.sensor_mean_predictor,
+            self.sensor_logvar_predictor,
+            self.sensor_reliability_predictor,
+        ):
+            for layer in module.modules():
+                if isinstance(layer, nn.Linear):
+                    nn.init.xavier_normal_(layer.weight)
+                    nn.init.zeros_(layer.bias)
+        nn.init.zeros_(self.sensor_logvar_predictor[-1].weight)
+        nn.init.constant_(self.sensor_logvar_predictor[-1].bias, -2.0)
+        nn.init.zeros_(self.sensor_reliability_predictor[-1].weight)
+        reliability_logit = math.log(
+            sensor_reliability_init / (1.0 - sensor_reliability_init)
+        )
+        nn.init.constant_(self.sensor_reliability_predictor[-1].bias, reliability_logit)
+
         # 三种模态各自一组 FiLM 参数；初始化严格对应 γ=1、β=0.1。
-        self.film_gamma = nn.Parameter(torch.ones(3, feature_dim))
-        self.film_beta = nn.Parameter(torch.full((3, feature_dim), 0.1))
+        self.film_gamma = nn.Parameter(
+            torch.full((3, feature_dim), float(film_gamma_init))
+        )
+        self.film_beta = nn.Parameter(
+            torch.full((3, feature_dim), float(film_beta_init))
+        )
 
         self.down_projection = nn.Linear(feature_dim, attention_dim)
         nn.init.xavier_normal_(self.down_projection.weight)
@@ -394,6 +451,7 @@ class MultimodalFusionClassifier(nn.Module):
 
         self.output_norm = nn.LayerNorm(feature_dim)
         self.classifier = nn.Linear(feature_dim, num_classes)
+        self.legacy_sensor_passthrough = False
         self.last_aux: dict[str, Tensor] = {}
 
     @classmethod
@@ -436,6 +494,9 @@ class MultimodalFusionClassifier(nn.Module):
         if batch_size is not None and features.shape[0] != batch_size:
             raise ValueError(f"{name} 的 batch 大小不一致")
 
+    def set_legacy_sensor_passthrough(self, enabled: bool = True) -> None:
+        self.legacy_sensor_passthrough = bool(enabled)
+
     def _prototype_context(
         self, visual: Tensor, sensor: Tensor, prototypes: Tensor
     ) -> tuple[Tensor, Tensor]:
@@ -451,6 +512,83 @@ class MultimodalFusionClassifier(nn.Module):
         weights = torch.softmax(scores / self.text_temperature, dim=-1)
         return weights @ prototypes, weights
 
+    def _visual_prototype_context(
+        self, visual: Tensor, prototypes: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        if prototypes.ndim != 2 or tuple(prototypes.shape) != (self.num_classes, 512):
+            raise ValueError(
+                f"text_prototypes must have shape [{self.num_classes},512], "
+                f"got {list(prototypes.shape)}"
+            )
+        query = F.normalize(visual, dim=-1)
+        bank = F.normalize(prototypes, dim=-1)
+        scores = query @ bank.transpose(0, 1)
+        weights = torch.softmax(scores / self.text_temperature, dim=-1)
+        return weights @ prototypes, weights
+
+    @staticmethod
+    def _prepare_sensor_availability(
+        sensor_available: Tensor | None,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tensor:
+        if sensor_available is None:
+            return torch.ones(batch_size, 1, device=device, dtype=dtype)
+        availability = torch.as_tensor(sensor_available, device=device, dtype=dtype)
+        if availability.ndim == 1:
+            availability = availability.unsqueeze(1)
+        if tuple(availability.shape) != (batch_size, 1):
+            raise ValueError("sensor_available must have shape [B,1] or [B]")
+        if not torch.isfinite(availability).all():
+            raise ValueError("sensor_available contains NaN or infinite values")
+        return availability.clamp(0.0, 1.0)
+
+    def _predict_sensor_latent(
+        self, visual: Tensor, visual_text_context: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        context = torch.cat((visual, visual_text_context), dim=-1)
+        predicted_sensor = self.sensor_mean_predictor(context)
+        raw_log_variance = self.sensor_logvar_predictor(context)
+        sensor_log_variance = self.sensor_log_variance_min + (
+            self.sensor_log_variance_max - self.sensor_log_variance_min
+        ) * torch.sigmoid(raw_log_variance)
+        return predicted_sensor, sensor_log_variance
+
+    def _estimate_sensor_reliability(
+        self,
+        actual_sensor: Tensor,
+        predicted_sensor: Tensor,
+        sensor_log_variance: Tensor,
+        sensor_available: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        precision = torch.exp(-sensor_log_variance)
+        discrepancy = ((actual_sensor - predicted_sensor).pow(2) * precision).mean(
+            dim=-1, keepdim=True
+        )
+        discrepancy = discrepancy.clamp(min=0.0, max=1e6)
+        uncertainty = torch.exp(sensor_log_variance).mean(dim=-1, keepdim=True)
+        uncertainty = uncertainty.clamp(min=0.0, max=1e6)
+        cosine = F.cosine_similarity(
+            actual_sensor, predicted_sensor, dim=-1, eps=1e-6
+        ).unsqueeze(1)
+        consistency = ((cosine + 1.0) * 0.5).clamp(0.0, 1.0)
+        reliability_features = torch.cat(
+            (
+                torch.log1p(discrepancy),
+                consistency,
+                torch.log1p(uncertainty),
+                sensor_available,
+            ),
+            dim=-1,
+        )
+        raw_reliability = torch.sigmoid(
+            self.sensor_reliability_predictor(reliability_features)
+        )
+        sensor_reliability = raw_reliability * sensor_available
+        return sensor_reliability, consistency, discrepancy, uncertainty
+
     @staticmethod
     def _pairwise_modality_weights(tokens: Tensor) -> Tensor:
         normalized = F.normalize(tokens, dim=-1)
@@ -465,6 +603,7 @@ class MultimodalFusionClassifier(nn.Module):
         sensor_features: Tensor,
         text_prototypes: Tensor,
         *,
+        sensor_available: Tensor | None = None,
         return_aux: bool = False,
     ) -> Tensor | tuple[Tensor, dict[str, Tensor]]:
         """从预计算特征执行融合；此接口不需要 Ultralytics/Transformers。"""
@@ -485,15 +624,56 @@ class MultimodalFusionClassifier(nn.Module):
             weight * features
             for weight, features in zip(initial_scale_weights, projected_scales)
         )
+        visual_text_context, visual_prototype_weights = self._visual_prototype_context(
+            visual_base, text_prototypes
+        )
+        sensor_available_tensor = self._prepare_sensor_availability(
+            sensor_available,
+            batch_size=batch_size,
+            device=sensor_features.device,
+            dtype=sensor_features.dtype,
+        )
+        if self.legacy_sensor_passthrough:
+            if bool((sensor_available_tensor < 1.0).any()):
+                raise ValueError(
+                    "legacy checkpoint requires sensor_available=1; "
+                    "missing sensor inference requires a checkpoint retrained "
+                    "with reliability heads"
+                )
+            predicted_sensor = sensor_features
+            sensor_log_variance = torch.zeros_like(sensor_features)
+            sensor_reliability = torch.ones_like(sensor_available_tensor)
+            sensor_consistency = torch.ones_like(sensor_available_tensor)
+            sensor_discrepancy = torch.zeros_like(sensor_available_tensor)
+            sensor_uncertainty = torch.zeros_like(sensor_available_tensor)
+            effective_sensor = sensor_features
+        else:
+            predicted_sensor, sensor_log_variance = self._predict_sensor_latent(
+                visual_base, visual_text_context
+            )
+            (
+                sensor_reliability,
+                sensor_consistency,
+                sensor_discrepancy,
+                sensor_uncertainty,
+            ) = self._estimate_sensor_reliability(
+                sensor_features,
+                predicted_sensor,
+                sensor_log_variance,
+                sensor_available_tensor,
+            )
+            effective_sensor = predicted_sensor + sensor_reliability * (
+                sensor_features - predicted_sensor
+            )
         text_context, prototype_weights = self._prototype_context(
-            visual_base, sensor_features, text_prototypes
+            visual_base, effective_sensor, text_prototypes
         )
 
         tokens = torch.stack(
             (
                 self.visual_adapter(visual_base),
                 self.text_adapter(text_context),
-                self.sensor_adapter(sensor_features),
+                self.sensor_adapter(effective_sensor),
             ),
             dim=1,
         )
@@ -521,9 +701,18 @@ class MultimodalFusionClassifier(nn.Module):
 
         aux = {
             "prototype_weights": prototype_weights,
+            "visual_prototype_weights": visual_prototype_weights,
             "modality_weights": modality_weights,
             "scale_weights": scale_weights,
             "attention_weights": attention_weights,
+            "sensor_reliability": sensor_reliability,
+            "predicted_sensor": predicted_sensor,
+            "sensor_log_variance": sensor_log_variance,
+            "sensor_available": sensor_available_tensor,
+            "sensor_consistency": sensor_consistency,
+            "sensor_discrepancy": sensor_discrepancy,
+            "sensor_uncertainty": sensor_uncertainty,
+            "effective_sensor": effective_sensor,
         }
         self.last_aux = {name: value.detach() for name, value in aux.items()}
         return (logits, aux) if return_aux else logits
@@ -534,6 +723,7 @@ class MultimodalFusionClassifier(nn.Module):
         sensor_grid: Tensor,
         *,
         class_descriptions: Sequence[str] | None = None,
+        sensor_available: Tensor | None = None,
         return_aux: bool = False,
     ) -> Tensor | tuple[Tensor, dict[str, Tensor]]:
         """生产前向。签名刻意不包含 label/target 参数，避免文本标签泄漏。"""
@@ -557,6 +747,7 @@ class MultimodalFusionClassifier(nn.Module):
             visual_scales,
             sensor_features,
             text_prototypes,
+            sensor_available=sensor_available,
             return_aux=return_aux,
         )
 
@@ -593,8 +784,22 @@ def build_production_model(config: dict[str, Any]) -> MultimodalFusionClassifier
         attention_dim=int(model_config.get("attention_dim", 128)),
         attention_heads=int(model_config.get("attention_heads", 8)),
         dropout=float(model_config.get("dropout", 0.3)),
+        film_gamma_init=float(model_config.get("film_gamma_init", 1.0)),
+        film_beta_init=float(model_config.get("film_beta_init", 0.1)),
         scale_prior=model_config.get("scale_prior", [0.3, 0.5, 0.2]),
         text_temperature=float(model_config.get("text_temperature", 0.07)),
+        sensor_log_variance_min=float(
+            model_config.get("sensor_log_variance_min", -6.0)
+        ),
+        sensor_log_variance_max=float(
+            model_config.get("sensor_log_variance_max", 2.0)
+        ),
+        sensor_reliability_hidden_dim=int(
+            model_config.get("sensor_reliability_hidden_dim", 32)
+        ),
+        sensor_reliability_init=float(
+            model_config.get("sensor_reliability_init", 0.85)
+        ),
     )
     model.class_names = tuple(names)
     return model

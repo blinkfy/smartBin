@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import argparse
 import json
+import threading
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+import build_dataset
 from build_dataset import _parser as build_parser
 from build_dataset import build
 from mmfc.data import (
@@ -99,6 +102,208 @@ def _build_fixture_dataset(
     )
     build(args)
     return output, config
+
+
+def _build_many_args(
+    tmp_path: Path,
+    *,
+    count: int = 4,
+    sensor_mode: str = "qwen",
+    output: Path | None = None,
+    extra: list[str] | None = None,
+) -> argparse.Namespace:
+    annotations = tmp_path / "Annotations"
+    images = tmp_path / "images"
+    annotations.mkdir(exist_ok=True)
+    images.mkdir(exist_ok=True)
+    for index in range(count):
+        _write_fixture(
+            annotations,
+            images,
+            f"sample_{index:02d}",
+            shapes=[
+                {
+                    "label": "potato",
+                    "shape_type": "polygon",
+                    "points": [[2, 3], [20, 3], [20, 25], [2, 25]],
+                }
+            ],
+        )
+    config = tmp_path / "default.json"
+    _write_config(config, ["potato"])
+    output = output or (tmp_path / "generated")
+    argv = [
+        "--annotations",
+        str(annotations),
+        "--images",
+        str(images),
+        "--output",
+        str(output),
+        "--config",
+        str(config),
+        "--sensor-mode",
+        sensor_mode,
+        "--workers",
+        "2",
+        "--progress-every",
+        "1",
+        "--checkpoint-every",
+        "1",
+    ]
+    if extra:
+        argv.extend(extra)
+    return build_parser().parse_args(argv)
+
+
+def test_build_parser_rejects_invalid_workers_and_uses_safe_env_name() -> None:
+    parser = build_parser()
+    args = parser.parse_args([])
+    assert args.api_key_env == "DASHSCOPE_API_KEY"
+    assert args.workers == 4
+    assert not args.api_key_env.startswith("sk-")
+
+    for value in ("0", "33"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["--workers", value])
+
+
+def test_qwen_build_runs_workers_concurrently_and_keeps_sorted_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = {"active": 0, "max_active": 0}
+    lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=5.0)
+
+    class FakeEnhancer:
+        def __init__(self, **kwargs):
+            self.model = kwargs["model"]
+
+        def enhance(self, image, bbox, rule_record):
+            with lock:
+                state["active"] += 1
+                state["max_active"] = max(
+                    state["max_active"], state["active"]
+                )
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    state["active"] -= 1
+            return {
+                **rule_record,
+                "source": {
+                    **rule_record["source"],
+                    "generator": self.model,
+                    "model": self.model,
+                    "enhancement_status": "success",
+                    "attempts": 1,
+                },
+            }
+
+    monkeypatch.setattr(build_dataset, "qwen_api_key", lambda env_name: "fake")
+    monkeypatch.setattr(build_dataset, "QwenSensorEnhancer", FakeEnhancer)
+
+    args = _build_many_args(
+        tmp_path,
+        count=4,
+        sensor_mode="qwen",
+        extra=["--checkpoint-every", "2"],
+    )
+    stats = build(args)
+
+    assert state["max_active"] >= 2
+    assert stats["qwen_success_records"] == 4
+    sensors = read_jsonl(args.output / "sensors.jsonl")
+    sample_ids = [record["sample_id"] for record in sensors]
+    assert sample_ids == sorted(sample_ids)
+    assert all(
+        record["source"]["enhancement_status"] == "success"
+        for record in sensors
+    )
+    progress = capsys.readouterr().err
+    assert "100.0%" in progress
+    assert "qwen_success=4" in progress
+    assert "fallback=0" in progress
+    assert "errors=0" in progress
+
+
+def test_qwen_resume_reuses_success_records_without_new_enhance_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = {"count": 0}
+
+    class FakeEnhancer:
+        def __init__(self, **kwargs):
+            self.model = kwargs["model"]
+
+        def enhance(self, image, bbox, rule_record):
+            calls["count"] += 1
+            return {
+                **rule_record,
+                "source": {
+                    **rule_record["source"],
+                    "generator": self.model,
+                    "model": self.model,
+                    "enhancement_status": "success",
+                    "attempts": 1,
+                },
+            }
+
+    monkeypatch.setattr(build_dataset, "qwen_api_key", lambda env_name: "fake")
+    monkeypatch.setattr(build_dataset, "QwenSensorEnhancer", FakeEnhancer)
+    output = tmp_path / "generated"
+    first = _build_many_args(tmp_path, count=3, sensor_mode="qwen", output=output)
+    build(first)
+    assert calls["count"] == 3
+
+    second = _build_many_args(
+        tmp_path,
+        count=3,
+        sensor_mode="qwen",
+        output=output,
+        extra=["--resume"],
+    )
+    stats = build(second)
+
+    assert calls["count"] == 3
+    assert stats["resumed_sensor_records"] == 3
+    assert stats["qwen_success_records"] == 3
+
+
+def test_periodic_sensor_checkpoint_is_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_write_jsonl = build_dataset.write_jsonl
+    checkpoint_sizes: list[int] = []
+
+    def spy_write_jsonl(path, records):
+        original_write_jsonl(path, records)
+        if Path(path).name == "sensors.jsonl":
+            checkpoint_sizes.append(len(read_jsonl(path)))
+
+    monkeypatch.setattr(build_dataset, "write_jsonl", spy_write_jsonl)
+    args = _build_many_args(tmp_path, count=3, sensor_mode="rule")
+    stats = build(args)
+
+    assert any(0 < size < stats["samples"] for size in checkpoint_sizes)
+    assert checkpoint_sizes[-1] == stats["samples"]
+
+
+def test_qwen_build_without_key_uses_fallback_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    args = _build_many_args(tmp_path, count=2, sensor_mode="qwen")
+
+    stats = build(args)
+
+    assert stats["qwen_api_key_available"] is False
+    assert stats["qwen_success_records"] == 0
+    assert stats["fallback_sensor_records"] == 2
+    sensors = read_jsonl(args.output / "sensors.jsonl")
+    assert {
+        record["source"]["enhancement_status"] for record in sensors
+    } == {"fallback_no_api_key"}
 
 
 def test_polygon_bbox_is_clamped_and_rejects_invalid() -> None:

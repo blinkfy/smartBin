@@ -10,7 +10,7 @@ from mmfc.training import PROJECT_ROOT, load_config, train_from_config
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="训练多模态医疗废品分类器")
+    parser = argparse.ArgumentParser(description="训练多模态智能垃圾分类器")
     parser.add_argument(
         "--config",
         type=Path,

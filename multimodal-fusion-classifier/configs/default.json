@@ -93,6 +93,10 @@
       0.2
     ],
     "text_temperature": 0.07,
+    "sensor_log_variance_min": -6.0,
+    "sensor_log_variance_max": 2.0,
+    "sensor_reliability_hidden_dim": 32,
+    "sensor_reliability_init": 0.85,
     "freeze_yolo_layers": 5,
     "freeze_clip_text_layers": 3
   },
@@ -100,7 +104,21 @@
     "ce_weight": 1.0,
     "focal_weight": 1.0,
     "alpha": 0.25,
-    "gamma": 2.0
+    "gamma": 2.0,
+    "reconstruction_weight": 0.2,
+    "calibration_weight": 0.1
+  },
+  "robustness": {
+    "sensor_degradation": {
+      "enabled": true,
+      "missing_probability": 0.05,
+      "noise_probability": 0.2,
+      "noise_std": 0.03,
+      "bias_probability": 0.15,
+      "bias_strength": 0.08,
+      "stuck_probability": 0.05,
+      "quality_scale": 0.25
+    }
   },
   "data": {
     "train_manifest": "data/generated/train.jsonl",

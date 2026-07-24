@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import math
 import sys
+import time
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -32,10 +34,30 @@ from mmfc.sensors import (
     QwenSensorEnhancer,
     contains_leakage_key,
     qwen_api_key,
-    simulate_rule_sensor_from_path,
+    simulate_rule_sensor,
 )
 
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "default.json"
+
+
+def _bounded_int(
+    option: str, *, minimum: int, maximum: int | None = None
+) -> Any:
+    def parse(value: str) -> int:
+        try:
+            number = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"{option} must be an integer"
+            ) from exc
+        if number < minimum or (maximum is not None and number > maximum):
+            upper = f"..{maximum}" if maximum is not None else "+"
+            raise argparse.ArgumentTypeError(
+                f"{option} must be in range {minimum}{upper}"
+            )
+        return number
+
+    return parse
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -77,6 +99,29 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default="qwen3-vl-flash")
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument(
+        "--workers",
+        type=_bounded_int("--workers", minimum=1, maximum=32),
+        default=8,
+        help="Sensor generation concurrency, 1..32.",
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=_bounded_int("--progress-every", minimum=1),
+        default=10,
+        help="Progress line frequency for non-TTY output.",
+    )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=_bounded_int("--checkpoint-every", minimum=1),
+        default=20,
+        help="Write output/sensors.jsonl after every N newly completed samples.",
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Suppress intermediate progress lines; start/end summaries remain.",
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -231,7 +276,178 @@ def resume_record_usable(
     return False
 
 
+def _coerce_int_arg(
+    args: argparse.Namespace,
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    value = getattr(args, name, default)
+    if value is None:
+        value = default
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"--{name.replace('_', '-')} must be an integer") from exc
+    if number < minimum or (maximum is not None and number > maximum):
+        upper = f"..{maximum}" if maximum is not None else "+"
+        raise ValueError(
+            f"--{name.replace('_', '-')} must be in range {minimum}{upper}"
+        )
+    return number
+
+
+def _write_sensor_checkpoint(
+    path: Path, sensors_by_id: Mapping[str, Mapping[str, Any]]
+) -> None:
+    write_jsonl(
+        path,
+        [sensors_by_id[sample_id] for sample_id in sorted(sensors_by_id)],
+    )
+
+
+def _qwen_status_counts(record: Mapping[str, Any]) -> tuple[int, int]:
+    source = record.get("source")
+    if not isinstance(source, Mapping):
+        return 0, 0
+    status = source.get("enhancement_status")
+    if status == "success":
+        return 1, 0
+    if isinstance(status, str) and status.startswith("fallback"):
+        return 0, 1
+    return 0, 0
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None or not math.isfinite(seconds):
+        return "unknown"
+    seconds = max(0, int(round(seconds)))
+    minutes, second = divmod(seconds, 60)
+    hours, minute = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minute:02d}m{second:02d}s"
+    if minutes:
+        return f"{minutes}m{second:02d}s"
+    return f"{second}s"
+
+
+class _ProgressReporter:
+    def __init__(
+        self,
+        *,
+        total: int,
+        progress_every: int,
+        no_progress: bool,
+        stream: Any,
+    ) -> None:
+        self.total = total
+        self.progress_every = progress_every
+        self.no_progress = no_progress
+        self.stream = stream
+        self.is_tty = bool(getattr(stream, "isatty", lambda: False)())
+        self.started = time.monotonic()
+        self.last_completed = -1
+        self.last_was_tty = False
+
+    def _line(
+        self,
+        *,
+        phase: str,
+        completed: int,
+        reused: int,
+        qwen_success: int,
+        fallback: int,
+        errors: int,
+    ) -> str:
+        percent = 100.0 if self.total == 0 else completed / self.total * 100.0
+        elapsed = max(time.monotonic() - self.started, 1e-3)
+        rate = completed / elapsed if completed else 0.0
+        remaining = max(0, self.total - completed)
+        eta = remaining / rate if rate > 0 else (0.0 if remaining == 0 else None)
+        return (
+            f"sensor progress {phase}: completed={completed}/{self.total} "
+            f"percent={percent:.1f}% reused={reused} "
+            f"qwen_success={qwen_success} fallback={fallback} errors={errors} "
+            f"rate={rate:.2f} samples/s ETA={_format_duration(eta)}"
+        )
+
+    def emit(
+        self,
+        *,
+        phase: str,
+        completed: int,
+        reused: int,
+        qwen_success: int,
+        fallback: int,
+        errors: int,
+        force: bool = False,
+    ) -> None:
+        if not force:
+            if self.no_progress:
+                return
+            if not self.is_tty and completed - self.last_completed < self.progress_every:
+                return
+        line = self._line(
+            phase=phase,
+            completed=completed,
+            reused=reused,
+            qwen_success=qwen_success,
+            fallback=fallback,
+            errors=errors,
+        )
+        if self.is_tty:
+            self.stream.write("\r" + line)
+            self.last_was_tty = True
+            if phase in {"done", "interrupted"}:
+                self.stream.write("\n")
+        else:
+            if self.last_was_tty:
+                self.stream.write("\n")
+                self.last_was_tty = False
+            self.stream.write(line + "\n")
+        self.stream.flush()
+        self.last_completed = completed
+
+
+def _build_sensor_record(
+    sample: Mapping[str, Any],
+    *,
+    sensor_mode: str,
+    seed: int,
+    enhancer: QwenSensorEnhancer,
+) -> dict[str, Any]:
+    image_path = resolve_manifest_path(str(sample["image_path"]), PROJECT_ROOT)
+    with Image.open(image_path) as image:
+        rule_record = simulate_rule_sensor(
+            image,
+            sample["bbox"],
+            str(sample["sample_id"]),
+            seed=seed,
+            source_image_id=str(sample["source_image_id"]),
+        )
+        if sensor_mode == "qwen":
+            return enhancer.enhance(image, sample["bbox"], rule_record)
+        return rule_record
+
+
 def build(args: argparse.Namespace) -> dict[str, Any]:
+    seed = int(getattr(args, "seed", 20260724))
+    ratios = tuple(getattr(args, "ratios", (0.8, 0.1, 0.1)))
+    sensor_mode = str(getattr(args, "sensor_mode", "rule"))
+    if sensor_mode not in {"rule", "qwen"}:
+        raise ValueError("--sensor-mode must be rule or qwen")
+    limit = getattr(args, "limit", None)
+    dry_run = bool(getattr(args, "dry_run", False))
+    resume = bool(getattr(args, "resume", False))
+    output = Path(getattr(args, "output", DEFAULT_OUTPUT_DIR)).resolve()
+    model = str(getattr(args, "model", "qwen3-vl-flash"))
+    api_key_env = str(getattr(args, "api_key_env", "DASHSCOPE_API_KEY"))
+    workers = _coerce_int_arg(args, "workers", 4, minimum=1, maximum=32)
+    progress_every = _coerce_int_arg(args, "progress_every", 10, minimum=1)
+    checkpoint_every = _coerce_int_arg(args, "checkpoint_every", 20, minimum=1)
+
     canonical_labels = load_canonical_labels(
         getattr(args, "config", DEFAULT_CONFIG_PATH)
     )
@@ -239,27 +455,31 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         label: index for index, label in enumerate(canonical_labels)
     }
     samples, report = parse_labelme_annotations(
-        args.annotations, args.images, project_root=PROJECT_ROOT
+        getattr(args, "annotations", DEFAULT_ANNOTATIONS_DIR),
+        getattr(args, "images", DEFAULT_IMAGES_DIR),
+        project_root=PROJECT_ROOT,
     )
     unknown_labels = sorted(
         {sample["label"] for sample in samples} - set(label_to_index)
     )
     if unknown_labels:
         raise ValueError(
-            "标注包含类别配置中不存在的标签："
-            f"{unknown_labels}；请先更新配置或修正标注"
+            "annotations contain labels missing from config: "
+            f"{unknown_labels}; update the config or fix annotations"
         )
     for sample in samples:
         sample["label_id"] = label_to_index[sample["label"]]
     samples.sort(key=lambda item: item["sample_id"])
-    if args.limit is not None:
-        if args.limit < 0:
-            raise ValueError("--limit 不能为负数")
-        samples = samples[: args.limit]
-    split_records = split_samples(samples, seed=args.seed, ratios=args.ratios)
+    if limit is not None:
+        limit = int(limit)
+        if limit < 0:
+            raise ValueError("--limit must be non-negative")
+        samples = samples[:limit]
+    split_records = split_samples(samples, seed=seed, ratios=ratios)
     all_samples = [
         sample for split in SPLITS for sample in split_records[split]
     ]
+    ordered_samples = sorted(all_samples, key=lambda item: item["sample_id"])
     summary = {
         "samples": len(all_samples),
         "source_images": len({item["source_image_id"] for item in all_samples}),
@@ -269,83 +489,171 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "labels": canonical_labels,
         "issue_counts": report["issue_counts"],
-        "sensor_mode": args.sensor_mode,
-        "dry_run": bool(args.dry_run),
+        "sensor_mode": sensor_mode,
+        "dry_run": dry_run,
     }
-    if args.dry_run:
+    if dry_run:
         return summary
 
-    output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     for split in SPLITS:
         write_jsonl(output / f"{split}.jsonl", split_records[split])
 
-    resume_records = (
-        _load_resume(output / "sensors.jsonl") if args.resume else {}
-    )
-    api_key = qwen_api_key(args.api_key_env) if args.sensor_mode == "qwen" else None
+    resume_records = _load_resume(output / "sensors.jsonl") if resume else {}
+    api_key = qwen_api_key(api_key_env) if sensor_mode == "qwen" else None
     enhancer = QwenSensorEnhancer(
         api_key=api_key,
-        base_url=args.base_url,
-        model=args.model,
-        retries=args.retries,
-        timeout=args.timeout,
+        base_url=str(
+            getattr(
+                args,
+                "base_url",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+        ),
+        model=model,
+        retries=int(getattr(args, "retries", 2)),
+        timeout=float(getattr(args, "timeout", 45.0)),
     )
-    sensors: list[dict[str, Any]] = []
+    sensors_by_id: dict[str, Mapping[str, Any]] = {}
+    pending_samples: list[dict[str, Any]] = []
     sensor_issues: list[dict[str, Any]] = []
     reused = 0
     rejected_resume_records = 0
-    for number, sample in enumerate(
-        sorted(all_samples, key=lambda item: item["sample_id"]), 1
-    ):
-        old_record = resume_records.get(sample["sample_id"])
+    qwen_success = 0
+    fallback = 0
+
+    for sample in ordered_samples:
+        sample_id = str(sample["sample_id"])
+        old_record = resume_records.get(sample_id)
         if old_record is not None and resume_record_usable(
             old_record,
-            sensor_mode=args.sensor_mode,
-            qwen_model=args.model,
+            sensor_mode=sensor_mode,
+            qwen_model=model,
         ):
-            sensors.append(old_record)
+            sensors_by_id[sample_id] = old_record
             reused += 1
+            success_delta, fallback_delta = _qwen_status_counts(old_record)
+            qwen_success += success_delta
+            fallback += fallback_delta
             continue
         if old_record is not None:
             rejected_resume_records += 1
-        image_path = resolve_manifest_path(sample["image_path"], PROJECT_ROOT)
-        try:
-            rule_record = simulate_rule_sensor_from_path(
-                image_path,
-                sample["bbox"],
-                sample["sample_id"],
-                seed=args.seed,
-                source_image_id=sample["source_image_id"],
-            )
-            if args.sensor_mode == "qwen":
-                with Image.open(image_path) as image:
-                    sensor_record = enhancer.enhance(
-                        image, sample["bbox"], rule_record
-                    )
-            else:
-                sensor_record = rule_record
-            sensors.append(sensor_record)
-        except Exception as exc:
-            sensor_issues.append(
-                {
-                    "code": "sensor_generation_error",
-                    "sample_id": sample["sample_id"],
-                    "detail": f"{type(exc).__name__}: {exc}",
-                }
-            )
-        if number % 500 == 0:
-            print(f"传感器进度：{number}/{len(all_samples)}", file=sys.stderr)
+        pending_samples.append(sample)
 
-    sensors.sort(key=lambda item: item["sample_id"])
-    write_jsonl(output / "sensors.jsonl", sensors)
+    completed = reused
+    reporter = _ProgressReporter(
+        total=len(ordered_samples),
+        progress_every=progress_every,
+        no_progress=bool(getattr(args, "no_progress", False)),
+        stream=sys.stderr,
+    )
+    reporter.emit(
+        phase="start",
+        completed=completed,
+        reused=reused,
+        qwen_success=qwen_success,
+        fallback=fallback,
+        errors=len(sensor_issues),
+        force=True,
+    )
+
+    new_completed = 0
+    if pending_samples:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        future_to_sample: dict[
+            concurrent.futures.Future[dict[str, Any]], dict[str, Any]
+        ] = {}
+        try:
+            future_to_sample = {
+                executor.submit(
+                    _build_sensor_record,
+                    sample,
+                    sensor_mode=sensor_mode,
+                    seed=seed,
+                    enhancer=enhancer,
+                ): sample
+                for sample in pending_samples
+            }
+            for future in concurrent.futures.as_completed(future_to_sample):
+                sample = future_to_sample[future]
+                sample_id = str(sample["sample_id"])
+                try:
+                    sensor_record = future.result()
+                except Exception as exc:
+                    sensor_issues.append(
+                        {
+                            "code": "sensor_generation_error",
+                            "sample_id": sample_id,
+                            "detail": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                else:
+                    sensors_by_id[sample_id] = sensor_record
+                    success_delta, fallback_delta = _qwen_status_counts(
+                        sensor_record
+                    )
+                    qwen_success += success_delta
+                    fallback += fallback_delta
+                completed += 1
+                new_completed += 1
+                if new_completed % checkpoint_every == 0:
+                    _write_sensor_checkpoint(
+                        output / "sensors.jsonl", sensors_by_id
+                    )
+                reporter.emit(
+                    phase="progress",
+                    completed=completed,
+                    reused=reused,
+                    qwen_success=qwen_success,
+                    fallback=fallback,
+                    errors=len(sensor_issues),
+                )
+        except KeyboardInterrupt:
+            for future in future_to_sample:
+                future.cancel()
+            _write_sensor_checkpoint(output / "sensors.jsonl", sensors_by_id)
+            reporter.emit(
+                phase="interrupted",
+                completed=completed,
+                reused=reused,
+                qwen_success=qwen_success,
+                fallback=fallback,
+                errors=len(sensor_issues),
+                force=True,
+            )
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
+            raise
+        except BaseException:
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
+            raise
+        else:
+            executor.shutdown(wait=True)
+
+    _write_sensor_checkpoint(output / "sensors.jsonl", sensors_by_id)
+    reporter.emit(
+        phase="done",
+        completed=completed,
+        reused=reused,
+        qwen_success=qwen_success,
+        fallback=fallback,
+        errors=len(sensor_issues),
+        force=True,
+    )
+
+    sensors = [sensors_by_id[sample_id] for sample_id in sorted(sensors_by_id)]
     sensor_position = {
         record["sample_id"]: index for index, record in enumerate(sensors)
     }
     index = {
         "schema_version": 1,
-        "seed": args.seed,
-        "split_ratios": list(args.ratios),
+        "seed": seed,
+        "split_ratios": list(ratios),
         "labels": canonical_labels,
         "label_to_index": label_to_index,
         "samples": {
@@ -354,7 +662,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 "label_index": label_to_index[sample["label"]],
                 "sensor_index": sensor_position.get(sample["sample_id"]),
             }
-            for sample in sorted(all_samples, key=lambda item: item["sample_id"])
+            for sample in ordered_samples
         },
     }
     _write_ordered_json(output / "index.json", index)
@@ -376,7 +684,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "resumed_sensor_records": reused,
         "rejected_resume_records": rejected_resume_records,
         "sensor_errors": len(sensor_issues),
-        "qwen_api_key_available": bool(api_key) if args.sensor_mode == "qwen" else None,
+        "qwen_success_records": qwen_success,
+        "fallback_sensor_records": fallback,
+        "qwen_api_key_available": bool(api_key) if sensor_mode == "qwen" else None,
+        "workers": workers,
+        "checkpoint_every": checkpoint_every,
     }
     write_json(output / "stats.json", stats)
     report["selected_samples"] = len(all_samples)
@@ -392,11 +704,17 @@ def main() -> int:
     args = _parser().parse_args()
     try:
         summary = build(args)
+    except KeyboardInterrupt:
+        print(
+            "Build interrupted; completed sensor checkpoint was written when possible.",
+            file=sys.stderr,
+        )
+        return 130
     except (OSError, ValueError) as exc:
         print(f"构建失败：{exc}", file=sys.stderr)
         return 2
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    if not args.dry_run and summary.get("sensor_errors"):
+    if not getattr(args, "dry_run", False) and summary.get("sensor_errors"):
         return 1
     return 0
 

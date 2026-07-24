@@ -21,7 +21,7 @@ from mmfc.training import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="预测一个目标框内的医疗废品类别")
+    parser = argparse.ArgumentParser(description="预测一个目标框内的智能垃圾类别")
     parser.add_argument("--image", type=Path, required=True, help="原始图像路径")
     parser.add_argument(
         "--bbox",
@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         type=str,
         help='4×4 JSON 数组，例如 "[[0,...],...]"；也接受长度 16 的数组',
     )
+    sensor_group.add_argument(
+        "--sensor-missing",
+        action="store_true",
+        help="Use a zero sensor grid with availability=0.",
+    )
     parser.add_argument(
         "--checkpoint",
         type=Path,
@@ -54,7 +59,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _load_cli_grid(args: argparse.Namespace) -> torch.Tensor:
+def _load_cli_grid(
+    args: argparse.Namespace, *, return_availability: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    if getattr(args, "sensor_missing", False):
+        grid_tensor = torch.zeros(1, 1, 4, 4, dtype=torch.float32)
+        availability = torch.zeros(1, 1, dtype=torch.float32)
+        return (grid_tensor, availability) if return_availability else grid_tensor
+
     if args.sensor_json is not None:
         with args.sensor_json.expanduser().open("r", encoding="utf-8") as handle:
             value: Any = json.load(handle)
@@ -71,7 +83,9 @@ def _load_cli_grid(args: argparse.Namespace) -> torch.Tensor:
     grid_array = np.asarray(grid, dtype=np.float32)
     if np.any((grid_array < 0.0) | (grid_array > 1.0)):
         raise ValueError("预测传感器阵列值必须在 [0,1] 范围内")
-    return torch.tensor(grid, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+    grid_tensor = torch.tensor(grid, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+    availability = torch.ones(1, 1, dtype=torch.float32)
+    return (grid_tensor, availability) if return_availability else grid_tensor
 
 
 def _torch_load(path: Path, device: torch.device) -> dict[str, Any]:
@@ -110,6 +124,56 @@ def _validated_checkpoint_class_names(
     return checkpoint_names
 
 
+_COMPATIBLE_MISSING_PREFIXES = (
+    "sensor_mean_predictor.",
+    "sensor_logvar_predictor.",
+    "sensor_reliability_predictor.",
+)
+
+
+def _new_sensor_head_keys(model: torch.nn.Module) -> set[str]:
+    return {
+        key
+        for key in model.state_dict()
+        if key.startswith(_COMPATIBLE_MISSING_PREFIXES)
+    }
+
+
+def _load_model_state_compatible(model: torch.nn.Module, state: dict[str, Any]) -> None:
+    new_head_keys = _new_sensor_head_keys(model)
+    state_keys = set(state)
+    missing_new_heads = sorted(new_head_keys - state_keys)
+    result = model.load_state_dict(state, strict=False)
+    unexpected = list(result.unexpected_keys)
+    disallowed_missing = [
+        key
+        for key in result.missing_keys
+        if key not in new_head_keys
+    ]
+    if unexpected or disallowed_missing:
+        raise RuntimeError(
+            "checkpoint state is incompatible: "
+            f"missing={disallowed_missing}, unexpected={unexpected}"
+        )
+    if missing_new_heads:
+        if len(missing_new_heads) != len(new_head_keys):
+            raise RuntimeError(
+                "checkpoint state is incompatible: partial sensor reliability "
+                f"head missing={missing_new_heads}"
+            )
+        setter = getattr(model, "set_legacy_sensor_passthrough", None)
+        if callable(setter):
+            setter(True)
+        else:
+            setattr(model, "legacy_sensor_passthrough", True)
+    else:
+        setter = getattr(model, "set_legacy_sensor_passthrough", None)
+        if callable(setter):
+            setter(False)
+        else:
+            setattr(model, "legacy_sensor_passthrough", False)
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
@@ -128,7 +192,7 @@ def main() -> None:
 
     # 模型内部固定编码配置中的全部候选类别描述，不接收目标类别文本。
     model = build_production_model(config).to(device)
-    model.load_state_dict(checkpoint["model_state"], strict=True)
+    _load_model_state_compatible(model, checkpoint["model_state"])
     model.eval()
 
     image_size = int(config.get("data", {}).get("image_size", 640))
@@ -139,9 +203,16 @@ def main() -> None:
         image_size=image_size,
         preprocess=config.get("preprocess", {}),
     ).unsqueeze(0).to(device)
-    sensor = _load_cli_grid(args).to(device)
+    sensor, sensor_availability = _load_cli_grid(args, return_availability=True)
+    sensor = sensor.to(device)
+    sensor_availability = sensor_availability.to(device)
     with torch.no_grad():
-        logits, aux = model(image, sensor, return_aux=True)
+        logits, aux = model(
+            image,
+            sensor,
+            sensor_available=sensor_availability,
+            return_aux=True,
+        )
         probabilities = torch.softmax(logits, dim=-1)[0]
     predicted_id = int(probabilities.argmax())
     result = {
@@ -154,6 +225,8 @@ def main() -> None:
         },
         "modality_weights": aux["modality_weights"][0].cpu().tolist(),
         "scale_weights": aux["scale_weights"][0].cpu().tolist(),
+        "sensor_reliability": float(aux["sensor_reliability"][0, 0].cpu()),
+        "sensor_available": float(aux["sensor_available"][0, 0].cpu()),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
