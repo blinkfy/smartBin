@@ -1,0 +1,12 @@
+path: /home/featurize/data
+train: /home/featurize/data/combination
+val: /home/featurize/data/val
+
+# path: /
+# train: root/data/combination
+# val: root/data/val
+nc: 19 # 填写类别数
+
+names: ['potato', 'rabbitcut', 'battery1', 'battery5', 'bottle', 'brick', 'can', 'china', 'stone', 'drug', 'drugbag', 'mooli', 'battery', 'bottle2', 'drugbox', 'papercup','capsule','potatocut','paper']
+
+# train,val,test的路径根据自己情况而定

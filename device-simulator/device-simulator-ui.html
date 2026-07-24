@@ -1,0 +1,2705 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" type="image/webp" href="/robot-image">
+  <title>设备模拟器</title>
+  <style>
+    :root {
+      --bg: #f4f7f7;
+      --surface: #ffffff;
+      --surface-soft: #edf4f2;
+      --surface-muted: #f8faf9;
+      --text: #17201f;
+      --muted: #667572;
+      --subtle: #8b9996;
+      --border: #d7e1df;
+      --border-strong: #becdca;
+      --green: #138a63;
+      --green-soft: #e4f4ed;
+      --cyan: #147d92;
+      --cyan-soft: #e4f2f5;
+      --amber: #b87316;
+      --amber-soft: #fff3df;
+      --red: #c93f3a;
+      --red-soft: #fdebea;
+      --shadow: 0 8px 24px rgba(24, 49, 44, 0.07);
+      --radius: 8px;
+      --header-height: 64px;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #101716;
+      --surface: #17201f;
+      --surface-soft: #1d2a27;
+      --surface-muted: #131b1a;
+      --text: #edf5f3;
+      --muted: #a6b6b2;
+      --subtle: #7f918d;
+      --border: #2d3c39;
+      --border-strong: #435651;
+      --green: #4bd0a0;
+      --green-soft: #17392f;
+      --cyan: #64c4d5;
+      --cyan-soft: #17343a;
+      --amber: #f1b762;
+      --amber-soft: #3b2b16;
+      --red: #ff817b;
+      --red-soft: #40201f;
+      --shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    html {
+      min-width: 320px;
+      background: var(--bg);
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background: var(--bg);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: 0;
+      transition: background-color 180ms ease, color 180ms ease;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    button {
+      border: 0;
+    }
+
+    button:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 3px solid rgba(20, 125, 146, 0.24);
+      outline-offset: 2px;
+    }
+
+    .app-header {
+      position: relative;
+      z-index: 30;
+      height: var(--header-height);
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(14px);
+    }
+
+    .header-inner {
+      width: min(1440px, 100%);
+      height: 100%;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: #ffffff;
+      background: var(--green);
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      right: -3px;
+      bottom: -3px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--surface);
+      border-radius: 50%;
+      background: #3fcf84;
+    }
+
+    .brand-copy {
+      min-width: 0;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+      font-weight: 760;
+    }
+
+    .brand-subtitle {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .online-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--green);
+      background: var(--surface-muted);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+    }
+
+    .status-dot.pulse {
+      animation: statusPulse 1.8s ease-out infinite;
+    }
+
+    .icon-button {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--surface);
+      cursor: pointer;
+      transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+    }
+
+    .icon-button:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-soft);
+    }
+
+    .icon-button:active {
+      transform: scale(0.96);
+    }
+
+    .shell {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 18px 24px 28px;
+    }
+
+    .mode-toolbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 520px) minmax(0, 1fr);
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 14px;
+    }
+
+    .mode-switch {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+    }
+
+    .mode-button {
+      min-height: 40px;
+      padding: 0 18px;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 14px;
+      font-weight: 750;
+      cursor: pointer;
+      transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .mode-button:hover:not(.active) {
+      color: var(--text);
+      background: color-mix(in srgb, var(--surface) 58%, transparent);
+    }
+
+    .mode-button.active {
+      color: #ffffff;
+      background: var(--green);
+      box-shadow: 0 2px 8px rgba(19, 138, 99, 0.2);
+    }
+
+    .toolbar-note {
+      justify-self: end;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+    }
+
+    .toolbar-note strong {
+      color: var(--text);
+      font-weight: 750;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.12fr) minmax(440px, 0.88fr);
+      grid-template-areas:
+        "device connection"
+        "telemetry telemetry"
+        "controls controls"
+        "events events";
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .column {
+      display: contents;
+    }
+
+    .device-panel { grid-area: device; }
+    .telemetry-panel { grid-area: telemetry; }
+    .connection-panel { grid-area: connection; }
+    .controls-panel { grid-area: controls; }
+    .events-panel { grid-area: events; }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      animation: panelEnter 360ms ease both;
+    }
+
+    .panel-header {
+      min-height: 52px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.25;
+      font-weight: 780;
+    }
+
+    .panel-caption {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .device-visual {
+      position: relative;
+      height: 384px;
+      display: grid;
+      place-items: center;
+      padding: 22px 210px 22px 28px;
+      background: var(--surface-muted);
+      overflow: hidden;
+    }
+
+    .device-visual::before {
+      content: "";
+      position: absolute;
+      inset: 22px 34px 22px auto;
+      width: 1px;
+      background: var(--border);
+    }
+
+    .device-image {
+      display: block;
+      width: min(100%, 370px);
+      height: 332px;
+      object-fit: contain;
+      filter: drop-shadow(0 18px 20px rgba(19, 45, 39, 0.15));
+      transition: opacity 180ms ease, transform 260ms ease;
+    }
+
+    .device-image.bin-image {
+      width: min(70%, 400px);
+      height: 318px;
+      border-radius: 6px;
+      object-fit: cover;
+      filter: none;
+    }
+
+    .device-workflow {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+    }
+
+    .device-workflow[hidden] {
+      display: none;
+    }
+
+    .device-summary {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 210px;
+      padding: 30px 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      background: var(--surface);
+    }
+
+    .summary-state {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--green);
+      font-weight: 750;
+    }
+
+    .summary-name {
+      margin: 18px 0 6px;
+      font-size: 24px;
+      line-height: 1.28;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .summary-description {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .summary-rule {
+      height: 1px;
+      margin: 20px 0;
+      background: var(--border);
+    }
+
+    .summary-meta {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .summary-meta strong {
+      display: block;
+      margin-top: 2px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 720;
+      overflow-wrap: anywhere;
+    }
+
+    .telemetry-body {
+      min-height: 142px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--border);
+    }
+
+    .telemetry-panel .panel-header {
+      min-height: 44px;
+    }
+
+    .workflow-body {
+      padding: 16px;
+      background: var(--surface-muted);
+    }
+
+    .workflow-frame {
+      width: min(720px, 100%);
+      margin: 0 auto;
+    }
+
+    .workflow-stage {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      color: var(--green);
+      background: var(--green-soft);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .workflow-stage.error {
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 11px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: var(--surface);
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .metric-value {
+      display: block;
+      margin-top: 9px;
+      color: var(--text);
+      font-size: 23px;
+      line-height: 1.15;
+      font-weight: 780;
+      overflow-wrap: anywhere;
+    }
+
+    .metric-value.green { color: var(--green); }
+    .metric-value.cyan { color: var(--cyan); }
+    .metric-value.amber { color: var(--amber); }
+
+    .metric-foot {
+      display: block;
+      min-height: 16px;
+      margin-top: 7px;
+      color: var(--subtle);
+      font-size: 11px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      margin-top: 7px;
+      border-radius: 5px;
+      background: var(--surface-soft);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--green);
+      transition: width 320ms ease;
+    }
+
+    .connection-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 250px;
+      min-height: 100%;
+    }
+
+    .connection-details {
+      border-right: 1px solid var(--border);
+    }
+
+    .connection-status {
+      min-height: 52px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--green);
+      border-bottom: 1px solid var(--border);
+      font-weight: 780;
+    }
+
+    .detail-row {
+      min-height: 82px;
+      padding: 13px 12px 13px 16px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 34px;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .detail-row:last-child {
+      border-bottom: 0;
+    }
+
+    .detail-label {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .detail-value {
+      display: block;
+      margin-top: 4px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      word-break: break-all;
+    }
+
+    #connectLink {
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .copy-button {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-muted);
+      cursor: pointer;
+    }
+
+    .copy-button:hover {
+      color: var(--green);
+      border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+    }
+
+    .qr-area {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      background: var(--surface-muted);
+    }
+
+    .qr-title {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 780;
+    }
+
+    .qr-frame {
+      width: 188px;
+      aspect-ratio: 1;
+      padding: 7px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: #ffffff;
+    }
+
+    .qr-image {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .qr-hint {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .qr-refresh {
+      margin-top: 8px;
+      color: var(--green);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .control-body {
+      padding: 14px;
+    }
+
+    .bin-control-body {
+      padding: 10px;
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.5fr);
+      gap: 10px;
+    }
+
+    .deposit-form {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.5fr);
+      gap: 8px;
+    }
+
+    .deposit-vision,
+    .deposit-form,
+    .bin-actions {
+      grid-column: 1 / -1;
+    }
+
+    .category-switch,
+    .deposit-machine {
+      grid-column: 1;
+    }
+
+    .deposit-fields,
+    .compartment-grid {
+      grid-column: 2;
+    }
+
+    .deposit-vision {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-muted);
+      overflow: hidden;
+    }
+
+    .deposit-vision-header {
+      min-height: 32px;
+      padding: 5px 9px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .deposit-vision-header strong {
+      font-size: 13px;
+    }
+
+    .deposit-vision-badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .deposit-vision-badge {
+      padding: 3px 7px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-muted);
+    }
+
+    .category-switch {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .category-button {
+      min-height: 36px;
+      padding: 5px 4px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-muted);
+      font-size: 11px;
+      font-weight: 740;
+      cursor: pointer;
+    }
+
+    .category-button.active {
+      color: #ffffff;
+      border-color: var(--category-color, var(--green));
+      background: var(--category-color, var(--green));
+    }
+
+    .category-button[data-category="recyclable"] { --category-color: #147d92; }
+    .category-button[data-category="kitchen"] { --category-color: #138a63; }
+    .category-button[data-category="hazardous"] { --category-color: #c93f3a; }
+    .category-button[data-category="residual"] { --category-color: #65706e; }
+
+    .deposit-fields {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 112px 108px;
+      gap: 8px;
+    }
+
+    .deposit-select,
+    .deposit-input {
+      width: 100%;
+      min-width: 0;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--surface-muted);
+    }
+
+    .deposit-button {
+      height: 36px;
+      border-radius: 6px;
+      color: #ffffff;
+      background: var(--green);
+      font-weight: 760;
+      cursor: pointer;
+    }
+
+    .deposit-button:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+    }
+
+    .deposit-machine {
+      min-height: 68px;
+      padding: 6px 8px;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-muted);
+    }
+
+    .machine-visual {
+      position: relative;
+      width: 54px;
+      height: 54px;
+      margin: 0 auto;
+    }
+
+    .machine-lid {
+      position: absolute;
+      z-index: 2;
+      top: 4px;
+      left: 5px;
+      width: 44px;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--text);
+      transform-origin: 8px 50%;
+      transition: transform 320ms ease;
+    }
+
+    .machine-visual.lid-open .machine-lid,
+    .machine-visual.lid-opening .machine-lid { transform: rotate(-34deg) translateY(-4px); }
+    .machine-visual.lid-closing .machine-lid { transform: rotate(-12deg); }
+
+    .machine-body {
+      position: absolute;
+      left: 9px;
+      bottom: 0;
+      width: 36px;
+      height: 40px;
+      border: 2px solid var(--border-strong);
+      border-radius: 5px 5px 8px 8px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .machine-body::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: var(--machine-fill, 18%);
+      background: var(--machine-color, var(--green));
+      opacity: 0.72;
+      transition: height 380ms ease, background-color 180ms ease;
+    }
+
+    .machine-copy strong,
+    .machine-copy span {
+      display: block;
+    }
+
+    .machine-copy strong {
+      font-size: 13px;
+    }
+
+    .machine-copy span {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .deposit-progress {
+      height: 4px;
+      margin-top: 6px;
+      border-radius: 3px;
+      background: var(--surface-soft);
+      overflow: hidden;
+    }
+
+    .deposit-progress-fill {
+      width: 0;
+      height: 100%;
+      background: var(--green);
+      transition: width 260ms ease;
+    }
+
+    .compartment-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .compartment {
+      min-width: 0;
+      padding: 5px 7px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-muted);
+    }
+
+    .compartment.full { border-color: var(--red); }
+    .compartment-name { display: block; color: var(--muted); font-size: 10px; }
+    .compartment-value { display: block; margin-top: 2px; font-size: 14px; font-weight: 780; }
+    .compartment-foot { display: block; margin-top: 2px; color: var(--subtle); font-size: 9px; }
+
+    .bin-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .clear-bin-button {
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--red);
+      background: var(--red-soft);
+      font-weight: 720;
+      cursor: pointer;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .control-button {
+      min-width: 0;
+      min-height: 68px;
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--surface-muted);
+      font-size: 13px;
+      font-weight: 760;
+      cursor: pointer;
+      transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease;
+    }
+
+    .control-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+    }
+
+    .control-button:active:not(:disabled) {
+      transform: translateY(0) scale(0.98);
+    }
+
+    .control-button .symbol {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .control-button.start {
+      color: #ffffff;
+      border-color: var(--green);
+      background: var(--green);
+    }
+
+    .control-button.pause {
+      color: var(--amber);
+      border-color: color-mix(in srgb, var(--amber) 34%, var(--border));
+      background: var(--amber-soft);
+    }
+
+    .control-button.stop {
+      color: #ffffff;
+      border-color: var(--red);
+      background: var(--red);
+    }
+
+    .control-button.reset {
+      color: var(--cyan);
+      border-color: color-mix(in srgb, var(--cyan) 32%, var(--border));
+      background: var(--cyan-soft);
+    }
+
+    .control-button:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+      filter: grayscale(0.35);
+    }
+
+    .control-note {
+      min-height: 22px;
+      margin: 10px 2px 0;
+      color: var(--muted);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .text-image-body {
+      padding: 8px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(190px, 220px);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .deposit-vision .text-image-body {
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 330px);
+      background: var(--surface);
+    }
+
+    .text-image-form {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+      align-content: start;
+    }
+
+    .text-image-input {
+      width: 100%;
+      min-height: 50px;
+      height: 50px;
+      padding: 6px 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--surface-muted);
+      resize: vertical;
+    }
+
+    .text-image-input:focus {
+      border-color: color-mix(in srgb, var(--cyan) 48%, var(--border));
+      outline: 0;
+    }
+
+    .text-image-presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .text-image-preset {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      padding: 4px 8px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .text-image-preset:hover,
+    .text-image-preset.active {
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    .text-image-button {
+      width: 100%;
+      min-height: 32px;
+      border-radius: 6px;
+      color: #ffffff;
+      background: var(--green);
+      font-weight: 760;
+      cursor: pointer;
+    }
+
+    .text-image-button:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+    }
+
+    .text-image-status {
+      min-height: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .text-image-status.error {
+      color: var(--red);
+    }
+
+    .text-image-preview {
+      width: 100%;
+      aspect-ratio: 1;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-muted);
+      overflow: hidden;
+    }
+
+    .text-image-preview img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #ffffff;
+    }
+
+    .deposit-preview-stack {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(135px, 152px) minmax(130px, 1fr);
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .recognition-result {
+      min-height: 0;
+      padding: 7px 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-muted);
+    }
+
+    .recognition-result strong,
+    .recognition-result span {
+      display: block;
+    }
+
+    .recognition-result strong {
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .recognition-result span {
+      margin-top: 4px;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .recognition-result.success { border-color: color-mix(in srgb, var(--green) 42%, var(--border)); }
+    .recognition-result.conflict { border-color: color-mix(in srgb, var(--amber) 55%, var(--border)); background: var(--amber-soft); }
+    .recognition-result.error { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); background: var(--red-soft); }
+
+    .text-image-placeholder {
+      padding: 18px;
+      color: var(--subtle);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .events-body {
+      height: 100%;
+      min-height: 318px;
+      max-height: 390px;
+      overflow: auto;
+      scrollbar-color: var(--border-strong) transparent;
+    }
+
+    .event-row {
+      min-height: 46px;
+      padding: 9px 14px;
+      display: grid;
+      grid-template-columns: 64px 9px 70px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .event-row:last-child {
+      border-bottom: 0;
+    }
+
+    .event-time,
+    .event-level {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .event-level {
+      font-size: 10px;
+      font-weight: 760;
+    }
+
+    .event-message {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--text);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .event-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .event-dot.info { background: var(--cyan); }
+    .event-dot.warn { background: var(--amber); }
+    .event-dot.error { background: var(--red); }
+
+    .events-empty {
+      height: 100%;
+      min-height: 150px;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .footer {
+      min-height: 42px;
+      margin-top: 14px;
+      padding: 0 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .footer-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .footer-separator {
+      width: 1px;
+      height: 14px;
+      background: var(--border-strong);
+    }
+
+    .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      z-index: 60;
+      max-width: min(360px, calc(100vw - 32px));
+      padding: 10px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 10px);
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    .skeleton {
+      color: transparent !important;
+      border-radius: 4px;
+      background: var(--surface-soft);
+    }
+
+    @keyframes statusPulse {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent); }
+      70% { box-shadow: 0 0 0 7px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+
+    @keyframes panelEnter {
+      from { opacity: 0; transform: translateY(7px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1120px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "device"
+          "connection"
+          "controls"
+          "telemetry"
+          "workflow"
+          "events";
+      }
+    }
+
+    @media (max-width: 760px) {
+      :root {
+        --header-height: 58px;
+      }
+
+      .header-inner,
+      .shell {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .brand-subtitle,
+      .online-status span:last-child,
+      .toolbar-note {
+        display: none;
+      }
+
+      .brand-title {
+        font-size: 18px;
+      }
+
+      .online-status {
+        width: 38px;
+        padding: 0;
+        justify-content: center;
+      }
+
+      .mode-toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-template-areas: none;
+      }
+
+      .column {
+        display: contents;
+      }
+
+      .device-panel,
+      .telemetry-panel,
+      .connection-panel,
+      .controls-panel,
+      .events-panel {
+        grid-column: auto;
+        grid-area: auto;
+      }
+
+      .device-panel { order: 1; }
+      .controls-panel { order: 2; }
+      .telemetry-panel { order: 3; }
+      .connection-panel { order: 4; }
+      .events-panel { order: 5; }
+
+      .device-visual {
+        height: 430px;
+        padding: 14px 16px 156px;
+      }
+
+      .device-visual::before {
+        display: none;
+      }
+
+      .device-image,
+      .device-image.bin-image {
+        width: 100%;
+        height: 254px;
+      }
+
+      .device-summary {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: 160px;
+        padding: 18px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        align-content: center;
+        gap: 8px 18px;
+        border-top: 1px solid var(--border);
+      }
+
+      .summary-state,
+      .summary-name,
+      .summary-description,
+      .summary-rule {
+        grid-column: 1;
+      }
+
+      .summary-name {
+        margin: 2px 0;
+        font-size: 20px;
+      }
+
+      .summary-rule {
+        display: none;
+      }
+
+      .summary-meta {
+        grid-column: 2;
+        grid-row: 1 / span 3;
+        align-self: center;
+      }
+
+      .telemetry-body {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .connection-grid {
+        grid-template-columns: 1fr;
+        min-height: 0;
+      }
+
+      .connection-details {
+        border-right: 0;
+      }
+
+      .qr-area {
+        border-top: 1px solid var(--border);
+      }
+
+      .qr-frame {
+        width: min(200px, 72vw);
+      }
+
+      .control-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .deposit-form {
+        grid-template-columns: 1fr;
+      }
+
+      .bin-control-body {
+        grid-template-columns: 1fr;
+      }
+
+      .deposit-vision,
+      .category-switch,
+      .deposit-fields,
+      .deposit-machine,
+      .compartment-grid,
+      .bin-actions {
+        grid-column: 1;
+      }
+
+      .text-image-body {
+        grid-template-columns: 1fr;
+      }
+
+      .deposit-vision .text-image-body {
+        grid-template-columns: 1fr;
+      }
+
+      .text-image-preview {
+        width: min(100%, 320px);
+        justify-self: center;
+      }
+
+      .deposit-fields {
+        grid-template-columns: minmax(0, 1fr) 96px;
+      }
+
+      .deposit-button { grid-column: 1 / -1; }
+
+      .compartment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+      .footer {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .events-body {
+        min-height: 238px;
+        max-height: 320px;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .deposit-preview-stack {
+        grid-template-columns: 1fr;
+      }
+
+      .text-image-preview {
+        width: min(100%, 240px);
+      }
+
+      .mode-button {
+        padding: 0 8px;
+        font-size: 13px;
+      }
+
+      .device-visual {
+        height: 430px;
+        padding-bottom: 184px;
+      }
+
+      .device-summary {
+        grid-template-columns: 1fr;
+        height: 178px;
+      }
+
+      .summary-meta {
+        display: none;
+      }
+
+      .telemetry-body {
+        padding: 12px;
+      }
+
+      .metric {
+        padding: 14px 10px;
+      }
+
+      .metric-value {
+        font-size: 22px;
+      }
+
+      .event-row {
+        grid-template-columns: 54px 8px minmax(0, 1fr);
+      }
+
+      .event-level {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">♻</div>
+        <div class="brand-copy">
+          <h1 class="brand-title">设备模拟器</h1>
+          <span class="brand-subtitle">分投侠设备运行与控制台</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="online-status" id="onlineStatus" aria-live="polite">
+          <span class="status-dot pulse"></span>
+          <span>模拟器在线</span>
+        </div>
+        <button class="icon-button" id="themeButton" type="button" title="切换明暗主题" aria-label="切换明暗主题">☾</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="mode-toolbar">
+      <div class="mode-switch" role="tablist" aria-label="设备模式">
+        <button class="mode-button active" id="binModeButton" type="button" role="tab" aria-selected="true" data-mode="bin">垃圾桶设备</button>
+        <button class="mode-button" id="robotModeButton" type="button" role="tab" aria-selected="false" data-mode="robot">虚拟机器人</button>
+      </div>
+      <div class="toolbar-note">当前由 <strong>Python 本地模拟器</strong> 提供实时数据</div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="column left-column">
+        <section class="panel device-panel" aria-labelledby="deviceVisualTitle">
+          <div class="panel-header">
+            <h2 class="panel-title" id="deviceVisualTitle">设备概览</h2>
+            <span class="panel-caption mono" id="lastUpdated">等待状态同步</span>
+          </div>
+          <div class="device-visual">
+            <img class="device-image bin-image" id="deviceImage" src="/bin-image" alt="垃圾桶设备">
+            <sorting-workflow-player
+              class="device-workflow"
+              id="workflowPlayer"
+              stage="idle"
+              src="/sorting-robot/layers"
+              rig-src="/sorting-robot/rig.json"
+              timeline-src="/sorting-robot/timeline.json"
+              hidden
+            ></sorting-workflow-player>
+            <div class="device-summary">
+              <div class="summary-state"><span class="status-dot pulse"></span><span id="summaryState">设备在线</span></div>
+              <h3 class="summary-name" id="deviceName">垃圾桶设备</h3>
+              <p class="summary-description" id="deviceDescription">位置与环境数据持续上报</p>
+              <div class="summary-rule"></div>
+              <div class="summary-meta">
+                <div>运行状态<strong id="robotState">serving</strong></div>
+                <div>当前阶段<strong id="robotPhase">正常服务</strong></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel telemetry-panel" aria-labelledby="telemetryTitle">
+          <div class="panel-header">
+            <h2 class="panel-title" id="telemetryTitle">实时遥测</h2>
+            <span class="panel-caption" id="telemetrySource">等待上报</span>
+          </div>
+          <div class="telemetry-body">
+            <article class="metric">
+              <span class="metric-label">电量</span>
+              <strong class="metric-value green" id="batteryValue">--%</strong>
+              <span class="metric-foot" id="batteryFoot">设备电池余量</span>
+            </article>
+            <article class="metric">
+              <span class="metric-label">当前位置</span>
+              <strong class="metric-value cyan" id="positionValue">--</strong>
+              <span class="metric-foot mono" id="positionFoot">纬度 / 经度</span>
+            </article>
+            <article class="metric">
+              <span class="metric-label" id="metricThreeLabel">满载率</span>
+              <strong class="metric-value" id="metricThreeValue">--%</strong>
+              <div>
+                <span class="metric-foot" id="metricThreeFoot">垃圾桶当前容量</span>
+                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+              </div>
+            </article>
+            <article class="metric">
+              <span class="metric-label" id="metricFourLabel">当前重量</span>
+              <strong class="metric-value amber" id="metricFourValue">-- kg</strong>
+              <span class="metric-foot" id="metricFourFoot">称重传感器数据</span>
+            </article>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="column right-column">
+        <section class="panel connection-panel" aria-labelledby="connectionTitle">
+          <div class="connection-grid">
+            <div class="connection-details">
+              <div class="connection-status"><span class="status-dot pulse"></span><span id="connectionTitle">设备连接可用</span></div>
+              <div class="detail-row">
+                <div><span class="detail-label">设备 ID</span><strong class="detail-value mono" id="deviceId">--</strong></div>
+                <button class="copy-button" type="button" title="复制设备 ID" aria-label="复制设备 ID" data-copy-target="deviceId">⧉</button>
+              </div>
+              <div class="detail-row">
+                <div><span class="detail-label">当前配对用户</span><strong class="detail-value" id="pairedUser">等待用户扫码连接</strong></div>
+                <span class="status-dot" id="pairingDot" style="color: var(--subtle)"></span>
+              </div>
+              <div class="detail-row">
+                <div><span class="detail-label">快速连接链接</span><strong class="detail-value mono" id="connectLink">--</strong></div>
+                <button class="copy-button" type="button" title="复制快速连接链接" aria-label="复制快速连接链接" data-copy-target="connectLink">⧉</button>
+              </div>
+              <div class="detail-row">
+                <div><span class="detail-label">设备 Token</span><strong class="detail-value mono" id="tokenValue">--</strong></div>
+                <button class="copy-button" type="button" title="复制设备 Token" aria-label="复制设备 Token" data-copy-target="tokenValue" data-copy-raw="token">⧉</button>
+              </div>
+            </div>
+            <div class="qr-area">
+              <h2 class="qr-title">连接二维码</h2>
+              <div class="qr-frame"><img class="qr-image" id="qrImage" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="设备连接二维码"></div>
+              <p class="qr-hint">使用客户端“连接设备”扫描</p>
+              <button class="qr-refresh" id="refreshQrButton" type="button">↻ 刷新二维码</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel controls-panel" aria-labelledby="controlsTitle">
+          <div class="panel-header">
+            <h2 class="panel-title" id="controlsTitle">虚拟投放</h2>
+            <span class="panel-caption" id="controlState">等待投放</span>
+          </div>
+          <div class="bin-control-body" id="binControlBody">
+            <div class="deposit-vision" id="depositVision">
+              <div class="deposit-vision-header">
+                <strong>投放图生成与分类</strong>
+                <div class="deposit-vision-badges">
+                  <span class="deposit-vision-badge" id="textImageCaption">SDXS · WebGPU</span>
+                  <span class="deposit-vision-badge">YOLO · 自定义启用</span>
+                </div>
+              </div>
+              <div class="text-image-body">
+                <div class="text-image-form">
+                  <div class="text-image-presets" id="textImagePresets" aria-label="投放图示例">
+                    <button class="text-image-preset active" type="button" data-preset="plastic-bottle">塑料瓶</button>
+                    <button class="text-image-preset" type="button" data-preset="medicine-blister">废药板</button>
+                    <button class="text-image-preset" type="button" data-preset="vegetable">蔬菜</button>
+                    <button class="text-image-preset" type="button" data-preset="custom">自定义描述</button>
+                  </div>
+                  <textarea class="text-image-input" id="textImagePrompt" rows="2" maxlength="500" placeholder="输入待投放物描述" aria-label="投放图描述"></textarea>
+                  <button class="text-image-button" id="textImageButton" type="button">生成投放图</button>
+                  <div class="text-image-status" id="textImageStatus" aria-live="polite">正在加载SDXS单步模型。</div>
+                  <div class="progress-bar" aria-hidden="true"><div class="progress-fill" id="textImageProgressFill"></div></div>
+                </div>
+                <div class="deposit-preview-stack">
+                  <div class="text-image-preview" id="textImagePreview">
+                    <div class="text-image-placeholder">生成的投放图将在这里显示</div>
+                  </div>
+                  <div class="recognition-result" id="recognitionResult" aria-live="polite">
+                    <strong id="recognitionState">等待投放图</strong>
+                    <span id="recognitionDetail">预置直接使用标签；自定义描述使用YOLO识别</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="deposit-form">
+              <div class="category-switch" id="categorySwitch" aria-label="垃圾分类">
+                <button class="category-button active" type="button" data-category="recyclable">可回收</button>
+                <button class="category-button" type="button" data-category="kitchen">厨余</button>
+                <button class="category-button" type="button" data-category="hazardous">有害</button>
+                <button class="category-button" type="button" data-category="residual">其他</button>
+              </div>
+              <div class="deposit-fields">
+                <select class="deposit-select" id="wasteItemSelect" aria-label="投放物品"></select>
+                <input class="deposit-input" id="wasteWeightInput" type="number" min="0.01" max="5" step="0.01" value="0.25" aria-label="投放重量（千克）">
+                <button class="deposit-button" id="depositButton" type="button">模拟投放</button>
+              </div>
+            </div>
+            <div class="deposit-machine">
+              <div class="machine-visual" id="machineVisual">
+                <div class="machine-lid"></div>
+                <div class="machine-body"></div>
+              </div>
+              <div class="machine-copy">
+                <strong id="depositPhase">等待投放</strong>
+                <span id="depositMessage">设备就绪</span>
+                <div class="deposit-progress"><div class="deposit-progress-fill" id="depositProgressFill"></div></div>
+              </div>
+            </div>
+            <div class="compartment-grid" id="compartmentGrid"></div>
+            <div class="bin-actions">
+              <span id="depositSummary">四分类仓独立称重与满载检测</span>
+              <button class="clear-bin-button" id="clearBinButton" type="button">模拟清运</button>
+            </div>
+          </div>
+          <div class="control-body" id="robotControlBody" hidden>
+            <div class="control-grid">
+              <button class="control-button start" type="button" data-action="start"><span class="symbol">▶</span><span>开始</span></button>
+              <button class="control-button pause" type="button" data-action="pause"><span class="symbol">Ⅱ</span><span>暂停</span></button>
+              <button class="control-button stop" type="button" data-action="emergency_stop"><span class="symbol">●</span><span>急停</span></button>
+              <button class="control-button reset" type="button" data-action="reset"><span class="symbol">↻</span><span>复位</span></button>
+            </div>
+            <p class="control-note" id="controlNote">垃圾桶模式仅上报遥测，不接收机器人动作。</p>
+          </div>
+        </section>
+
+        <section class="panel events-panel" aria-labelledby="eventsTitle">
+          <div class="panel-header">
+            <h2 class="panel-title" id="eventsTitle">后端通知</h2>
+            <span class="panel-caption" id="eventCount">0 条事件</span>
+          </div>
+          <div class="events-body" id="eventsBody">
+            <div class="events-empty">等待设备上报与后端通知</div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-group">
+        <span>运行模式：<strong id="footerMode">本地模拟</strong></span>
+        <span class="footer-separator"></span>
+        <span>状态刷新：1 秒</span>
+      </div>
+      <div class="footer-group">
+        <span>系统时间：<span class="mono" id="systemClock">--:--:--</span></span>
+        <span class="footer-separator"></span>
+        <span><span class="status-dot"></span>&nbsp;运行中</span>
+      </div>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { TEXT_TO_IMAGE_PRESETS, preloadTextToImageModel, textToImage, disposeTextToImage } from '/textToImage.js'
+    import { mapSortingWorkflowStage } from '/sorting-workflow-player.js'
+
+    const elements = {
+      binModeButton: document.getElementById('binModeButton'),
+      robotModeButton: document.getElementById('robotModeButton'),
+      themeButton: document.getElementById('themeButton'),
+      deviceImage: document.getElementById('deviceImage'),
+      deviceName: document.getElementById('deviceName'),
+      deviceDescription: document.getElementById('deviceDescription'),
+      summaryState: document.getElementById('summaryState'),
+      robotState: document.getElementById('robotState'),
+      robotPhase: document.getElementById('robotPhase'),
+      lastUpdated: document.getElementById('lastUpdated'),
+      batteryValue: document.getElementById('batteryValue'),
+      positionValue: document.getElementById('positionValue'),
+      positionFoot: document.getElementById('positionFoot'),
+      metricThreeLabel: document.getElementById('metricThreeLabel'),
+      metricThreeValue: document.getElementById('metricThreeValue'),
+      metricThreeFoot: document.getElementById('metricThreeFoot'),
+      metricFourLabel: document.getElementById('metricFourLabel'),
+      metricFourValue: document.getElementById('metricFourValue'),
+      metricFourFoot: document.getElementById('metricFourFoot'),
+      progressFill: document.getElementById('progressFill'),
+      telemetrySource: document.getElementById('telemetrySource'),
+      workflowPlayer: document.getElementById('workflowPlayer'),
+      deviceId: document.getElementById('deviceId'),
+      pairedUser: document.getElementById('pairedUser'),
+      pairingDot: document.getElementById('pairingDot'),
+      connectionTitle: document.getElementById('connectionTitle'),
+      connectLink: document.getElementById('connectLink'),
+      tokenValue: document.getElementById('tokenValue'),
+      qrImage: document.getElementById('qrImage'),
+      refreshQrButton: document.getElementById('refreshQrButton'),
+      controlsTitle: document.getElementById('controlsTitle'),
+      controlState: document.getElementById('controlState'),
+      controlNote: document.getElementById('controlNote'),
+      binControlBody: document.getElementById('binControlBody'),
+      robotControlBody: document.getElementById('robotControlBody'),
+      wasteItemSelect: document.getElementById('wasteItemSelect'),
+      wasteWeightInput: document.getElementById('wasteWeightInput'),
+      depositButton: document.getElementById('depositButton'),
+      clearBinButton: document.getElementById('clearBinButton'),
+      machineVisual: document.getElementById('machineVisual'),
+      depositPhase: document.getElementById('depositPhase'),
+      depositMessage: document.getElementById('depositMessage'),
+      depositProgressFill: document.getElementById('depositProgressFill'),
+      compartmentGrid: document.getElementById('compartmentGrid'),
+      depositSummary: document.getElementById('depositSummary'),
+      textImageCaption: document.getElementById('textImageCaption'),
+      textImagePresets: document.getElementById('textImagePresets'),
+      textImagePrompt: document.getElementById('textImagePrompt'),
+      textImageButton: document.getElementById('textImageButton'),
+      textImageStatus: document.getElementById('textImageStatus'),
+      textImageProgressFill: document.getElementById('textImageProgressFill'),
+      textImagePreview: document.getElementById('textImagePreview'),
+      recognitionResult: document.getElementById('recognitionResult'),
+      recognitionState: document.getElementById('recognitionState'),
+      recognitionDetail: document.getElementById('recognitionDetail'),
+      eventsBody: document.getElementById('eventsBody'),
+      eventCount: document.getElementById('eventCount'),
+      footerMode: document.getElementById('footerMode'),
+      systemClock: document.getElementById('systemClock'),
+      toast: document.getElementById('toast')
+    }
+
+    const appState = {
+      status: null,
+      refreshing: false,
+      statusPollTimer: 0,
+      statusFailures: 0,
+      statusPollingStopped: false,
+      qrRevision: '',
+      toastTimer: 0,
+      selectedCategory: 'recyclable',
+      categoryItems: {},
+      textImageLoading: true,
+      textImageGenerating: false,
+      textImageReady: false,
+      textImageError: '',
+      textImageUrl: '',
+      textImageBlob: null,
+      selectedTextImagePreset: 'plastic-bottle',
+      recognitionPending: false,
+      recognition: null,
+      recognitionConflict: false,
+      depositImageConsumed: false
+    }
+
+    const stateLabels = {
+      idle: '待命',
+      serving: '正常服务',
+      running: '执行中',
+      paused: '已暂停',
+      stopped: '已停止',
+      emergency_stopped: '紧急停止',
+      completed: '已完成'
+    }
+
+    function clamp(value, min = 0, max = 100) {
+      const number = Number(value)
+      return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : 0
+    }
+
+    function formatNumber(value, digits = 1) {
+      const number = Number(value)
+      return Number.isFinite(number) ? number.toFixed(digits).replace(/\.0$/, '') : '--'
+    }
+
+    function formatTime(value) {
+      if (typeof value === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(value)) return value
+      const date = value ? new Date(value) : new Date()
+      if (Number.isNaN(date.getTime())) return '--:--:--'
+      return date.toLocaleTimeString('zh-CN', { hour12: false })
+    }
+
+    function maskToken(token) {
+      const text = String(token || '')
+      if (!text) return '等待设备上线'
+      if (text.length <= 16) return text
+      return `${text.slice(0, 8)}••••${text.slice(-6)}`
+    }
+
+    function showToast(message) {
+      window.clearTimeout(appState.toastTimer)
+      elements.toast.textContent = message
+      elements.toast.classList.add('visible')
+      appState.toastTimer = window.setTimeout(() => elements.toast.classList.remove('visible'), 1800)
+    }
+
+    function formatBytes(value) {
+      const bytes = Number(value)
+      if (!Number.isFinite(bytes) || bytes <= 0) return ''
+      if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+      if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`
+      return `${Math.round(bytes / 1024)} KB`
+    }
+
+    function setTextImageStatus(message, options = {}) {
+      elements.textImageStatus.textContent = message
+      elements.textImageStatus.classList.toggle('error', options.error === true)
+      if (typeof options.pct === 'number') {
+        elements.textImageProgressFill.style.width = `${clamp(options.pct)}%`
+      }
+    }
+
+    const YOLO_CONFIDENCE_THRESHOLD = 0.6
+
+    function selectedTextImagePreset() {
+      return TEXT_TO_IMAGE_PRESETS.find(item => item.id === appState.selectedTextImagePreset) || null
+    }
+
+    function setRecognitionResult(state, detail, tone = '') {
+      elements.recognitionState.textContent = state
+      elements.recognitionDetail.textContent = detail
+      elements.recognitionResult.className = `recognition-result${tone ? ` ${tone}` : ''}`
+    }
+
+    function updateDepositButton() {
+      const processing = appState.status?.bin?.status?.status === 'processing'
+      const ready = Boolean(appState.textImageBlob) && !appState.depositImageConsumed
+      elements.depositButton.disabled = processing || appState.textImageGenerating || appState.recognitionPending || !ready
+      elements.depositButton.textContent = appState.recognitionPending
+        ? '识别中'
+        : appState.depositImageConsumed
+          ? '已提交'
+          : '确认投放'
+    }
+
+    function updateTextImageButton() {
+      const hasPrompt = elements.textImagePrompt.value.trim().length > 0
+      const needsYolo = appState.selectedTextImagePreset === 'custom'
+      elements.textImageButton.disabled = !hasPrompt || appState.textImageLoading || appState.textImageGenerating || Boolean(appState.textImageError)
+      elements.textImageButton.textContent = appState.textImageGenerating
+        ? '生成中'
+        : appState.textImageLoading
+          ? '模型加载中'
+          : needsYolo
+            ? '生成投放图并识别'
+            : '生成投放图'
+      updateDepositButton()
+    }
+
+    function resetGeneratedDepositImage() {
+      cleanupTextImageUrl()
+      elements.textImageCaption.textContent = appState.textImageError ? '不可用' : 'SDXS · WebGPU'
+      appState.textImageBlob = null
+      appState.recognition = null
+      appState.recognitionConflict = false
+      appState.recognitionPending = false
+      appState.depositImageConsumed = false
+      elements.textImagePreview.replaceChildren()
+      const placeholder = document.createElement('div')
+      placeholder.className = 'text-image-placeholder'
+      placeholder.textContent = '生成的投放图将在这里显示'
+      elements.textImagePreview.appendChild(placeholder)
+      const preset = selectedTextImagePreset()
+      setRecognitionResult(
+        '等待投放图',
+        preset ? `生成后直接采用“${preset.label}”预置分类` : '生成后调用真实YOLO模型识别'
+      )
+      updateDepositButton()
+    }
+
+    function selectTextImagePreset(presetId, options = {}) {
+      const preset = TEXT_TO_IMAGE_PRESETS.find(item => item.id === presetId)
+      appState.selectedTextImagePreset = preset ? preset.id : 'custom'
+      elements.textImagePresets.querySelectorAll('[data-preset]').forEach(button => {
+        button.classList.toggle('active', button.dataset.preset === appState.selectedTextImagePreset)
+      })
+      if (preset && options.keepPrompt !== true) {
+        elements.textImagePrompt.value = preset.prompt
+        applyDepositChoice(preset.category, preset.item)
+      } else if (!preset && options.keepPrompt !== true) {
+        elements.textImagePrompt.value = ''
+        elements.textImagePrompt.focus()
+      }
+      if (options.keepImage !== true) resetGeneratedDepositImage()
+      if (appState.textImageReady && !appState.textImageGenerating) {
+        setTextImageStatus(preset
+          ? '预置词嵌入已选中，可直接生成。'
+          : '自定义描述将由模拟器服务端的词嵌入模型编码。', { pct: preset ? 100 : 0 })
+      }
+      updateTextImageButton()
+    }
+
+    function describeTextImageProgress(progress, fallback) {
+      const pctText = typeof progress.pct === 'number' ? `${Math.round(progress.pct)}%` : ''
+      const downloaded = formatBytes(progress.bytesDownloaded)
+      const total = formatBytes(progress.totalBytesExpected)
+      const sizeText = downloaded && total ? `${downloaded} / ${total}` : ''
+      return [progress.message || fallback, pctText, sizeText].filter(Boolean).join(' · ')
+    }
+
+    function handleTextImageLoadProgress(progress) {
+      const message = describeTextImageProgress(progress, '正在准备SDXS单步模型')
+      setTextImageStatus(message, { pct: progress.pct })
+    }
+
+    async function initTextToImage() {
+      appState.textImageLoading = true
+      appState.textImageError = ''
+      updateTextImageButton()
+      try {
+        await preloadTextToImageModel(handleTextImageLoadProgress)
+        appState.textImageReady = true
+        setTextImageStatus('SDXS单步模型已就绪；预置与自定义文本均可生成。', { pct: 100 })
+      } catch (error) {
+        appState.textImageError = error.message || '模型加载失败，请稍后重试'
+        elements.textImageCaption.textContent = '不可用'
+        setTextImageStatus(appState.textImageError, { error: true, pct: 0 })
+      } finally {
+        appState.textImageLoading = false
+        updateTextImageButton()
+      }
+    }
+
+    function cleanupTextImageUrl() {
+      if (appState.textImageUrl) {
+        URL.revokeObjectURL(appState.textImageUrl)
+        appState.textImageUrl = ''
+      }
+    }
+
+    function applyDepositChoice(category, item) {
+      selectCategory(category)
+      if (item && Array.from(elements.wasteItemSelect.options).some(option => option.value === item)) {
+        elements.wasteItemSelect.value = item
+      }
+    }
+
+    function applyPresetLabel(preset) {
+      applyDepositChoice(preset.category, preset.item)
+      appState.recognitionConflict = false
+      appState.recognition = {
+        source: 'preset-label',
+        category: preset.category,
+        item: preset.item,
+        detectedClass: null,
+        confidence: 1
+      }
+      setRecognitionResult(
+        `分类结果：${preset.label}`,
+        `${WASTE_CATEGORY_LABELS[preset.category]} / ${preset.item}`,
+        'success'
+      )
+    }
+
+    async function recognizeGeneratedImage(blob) {
+      appState.recognitionPending = true
+      appState.recognitionConflict = false
+      setRecognitionResult('YOLO识别中', '首次识别会启动并加载真实垃圾分割模型')
+      updateDepositButton()
+      try {
+        const response = await fetch('/yolo-recognize', {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type || 'image/png' },
+          body: blob
+        })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message || `YOLO识别失败（${response.status}）`)
+        }
+
+        const confidence = Number(result.confidence)
+        const confidenceText = Number.isFinite(confidence) ? `${(confidence * 100).toFixed(1)}%` : '--'
+        const confident = Number.isFinite(confidence) && confidence >= YOLO_CONFIDENCE_THRESHOLD
+
+        if (confident) {
+          applyDepositChoice(result.category, result.item)
+          appState.recognition = {
+            source: 'yolo',
+            category: result.category,
+            item: result.item,
+            detectedClass: result.className,
+            confidence
+          }
+          setRecognitionResult(
+            'YOLO识别完成',
+            `${result.className} · ${confidenceText} → ${result.item}`,
+            'success'
+          )
+        } else {
+          appState.recognition = {
+            source: 'manual',
+            category: appState.selectedCategory,
+            item: elements.wasteItemSelect.value,
+            detectedClass: result.className,
+            confidence
+          }
+          setRecognitionResult('需要人工确认', `YOLO：${result.className} ${confidenceText}，请修正类别和物品`, 'conflict')
+        }
+      } catch (error) {
+        appState.recognition = {
+          source: 'manual',
+          category: appState.selectedCategory,
+          item: elements.wasteItemSelect.value,
+          detectedClass: null,
+          confidence: null
+        }
+        setRecognitionResult('YOLO不可用', `${error.message}；请手动选择分类`, 'error')
+      } finally {
+        appState.recognitionPending = false
+        setTextImageStatus('投放图已生成；请确认识别结果和重量后投放。', { pct: 100 })
+        updateDepositButton()
+      }
+    }
+
+    async function generateTextImage() {
+      const prompt = elements.textImagePrompt.value.trim()
+      if (!prompt || appState.textImageGenerating) return
+
+      appState.textImageGenerating = true
+      appState.textImageError = ''
+      elements.textImageCaption.textContent = '生成中'
+      setTextImageStatus('正在生成图片...', { pct: 0 })
+      updateTextImageButton()
+
+      try {
+        const blob = await textToImage(prompt, progress => {
+          const message = describeTextImageProgress(progress, '正在生成图片')
+          setTextImageStatus(message, { pct: progress.pct })
+        }, appState.selectedTextImagePreset === 'custom'
+          ? {}
+          : { presetId: appState.selectedTextImagePreset })
+        if (!blob) return
+        const imageUrl = URL.createObjectURL(blob)
+        cleanupTextImageUrl()
+        appState.textImageUrl = imageUrl
+        appState.textImageBlob = blob
+        appState.depositImageConsumed = false
+        elements.textImagePreview.replaceChildren()
+        const image = document.createElement('img')
+        image.src = imageUrl
+        image.alt = prompt
+        image.width = 512
+        image.height = 512
+        elements.textImagePreview.appendChild(image)
+        elements.textImageCaption.textContent = '512×512'
+        const preset = selectedTextImagePreset()
+        if (preset) {
+          applyPresetLabel(preset)
+          setTextImageStatus('投放图已生成；已直接应用预置标签。', { pct: 100 })
+        } else {
+          setTextImageStatus('投放图生成完成，正在识别。', { pct: 100 })
+          await recognizeGeneratedImage(blob)
+        }
+      } catch (error) {
+        elements.textImageCaption.textContent = appState.textImageReady ? 'SDXS · WebGPU' : '不可用'
+        setTextImageStatus(error.message || '图片生成失败，请稍后重试', { error: true })
+      } finally {
+        appState.textImageGenerating = false
+        updateTextImageButton()
+      }
+    }
+
+    function setTheme(theme) {
+      const normalized = theme === 'dark' ? 'dark' : 'light'
+      document.documentElement.dataset.theme = normalized
+      elements.themeButton.textContent = normalized === 'dark' ? '☀' : '☾'
+      elements.themeButton.setAttribute('aria-label', normalized === 'dark' ? '切换到亮色主题' : '切换到暗色主题')
+      localStorage.setItem('device-simulator-theme', normalized)
+    }
+
+    function initTheme() {
+      const saved = localStorage.getItem('device-simulator-theme')
+      const preferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      setTheme(saved || preferred)
+    }
+
+    function setModeUi(mode) {
+      const isRobot = mode === 'robot'
+      elements.binModeButton.classList.toggle('active', !isRobot)
+      elements.robotModeButton.classList.toggle('active', isRobot)
+      elements.binModeButton.setAttribute('aria-selected', String(!isRobot))
+      elements.robotModeButton.setAttribute('aria-selected', String(isRobot))
+      elements.deviceImage.src = '/bin-image'
+      elements.deviceImage.alt = '垃圾桶设备'
+      elements.deviceImage.classList.add('bin-image')
+      elements.deviceImage.hidden = isRobot
+      elements.workflowPlayer.hidden = !isRobot
+      elements.deviceName.textContent = isRobot ? '虚拟机器人' : '垃圾桶设备'
+      elements.deviceDescription.textContent = isRobot ? '任务执行与状态闭环模拟' : '视觉识别、四分类与满载检测'
+      elements.footerMode.textContent = isRobot ? '虚拟机器人' : '垃圾桶设备'
+      elements.metricThreeLabel.textContent = isRobot ? '执行进度' : '满载率'
+      elements.metricThreeFoot.textContent = isRobot ? '当前闭环任务进度' : '垃圾桶当前容量'
+      elements.metricFourLabel.textContent = isRobot ? '当前阶段' : '当前重量'
+      elements.metricFourFoot.textContent = isRobot ? '机器人任务状态机' : '称重传感器数据'
+      elements.controlsTitle.textContent = isRobot ? '机器人控制' : '虚拟投放'
+      elements.binControlBody.hidden = isRobot
+      elements.robotControlBody.hidden = !isRobot
+      if (!isRobot) {
+        elements.workflowPlayer.removeAttribute('autoplay')
+        elements.workflowPlayer.pause?.()
+      }
+      document.querySelectorAll('[data-action]').forEach(button => {
+        button.disabled = !isRobot
+      })
+      elements.controlNote.textContent = isRobot
+        ? '控制动作会同步到后端执行结果，并由遥测刷新当前状态。'
+        : '垃圾桶模式仅上报遥测，不接收机器人动作。'
+    }
+
+    const categoryColors = {
+      recyclable: '#147d92',
+      kitchen: '#138a63',
+      hazardous: '#c93f3a',
+      residual: '#65706e'
+    }
+
+    const WASTE_CATEGORY_LABELS = {
+      recyclable: '可回收垃圾',
+      kitchen: '厨余垃圾',
+      hazardous: '有害垃圾',
+      residual: '其他垃圾'
+    }
+
+    function selectCategory(category) {
+      if (!appState.categoryItems[category]) return
+      appState.selectedCategory = category
+      document.querySelectorAll('[data-category]').forEach(button => {
+        button.classList.toggle('active', button.dataset.category === category)
+      })
+      const currentValue = elements.wasteItemSelect.value
+      elements.wasteItemSelect.replaceChildren()
+      appState.categoryItems[category].forEach(item => {
+        const option = document.createElement('option')
+        option.value = item
+        option.textContent = item
+        elements.wasteItemSelect.appendChild(option)
+      })
+      if (appState.categoryItems[category].includes(currentValue)) {
+        elements.wasteItemSelect.value = currentValue
+      }
+    }
+
+    function markRecognitionManualCorrection() {
+      if (!appState.textImageBlob || appState.recognitionPending) return
+      const previous = appState.recognition || {}
+      appState.recognition = {
+        ...previous,
+        source: 'manual-correction',
+        category: appState.selectedCategory,
+        item: elements.wasteItemSelect.value
+      }
+      setRecognitionResult(
+        '已人工确认分类',
+        `${elements.wasteItemSelect.value} → ${WASTE_CATEGORY_LABELS[appState.selectedCategory]}`,
+        'success'
+      )
+      updateDepositButton()
+    }
+
+    function renderBin(bin) {
+      if (!bin) return
+      const status = bin.status || {}
+      const categories = bin.categories || {}
+      Object.entries(categories).forEach(([key, value]) => {
+        appState.categoryItems[key] = Array.isArray(value.items) ? value.items : []
+      })
+      if (!elements.wasteItemSelect.options.length) selectCategory(appState.selectedCategory)
+
+      const activeCompartment = (bin.compartments || []).find(item => item.key === status.activeCategory)
+      const activeFill = activeCompartment ? activeCompartment.fillRate : bin.maxFillRate
+      const machineColor = categoryColors[status.activeCategory] || 'var(--green)'
+      elements.machineVisual.className = `machine-visual lid-${status.lid || 'closed'}`
+      elements.machineVisual.style.setProperty('--machine-fill', `${clamp(activeFill)}%`)
+      elements.machineVisual.style.setProperty('--machine-color', machineColor)
+      elements.depositPhase.textContent = status.phase || '等待投放'
+      elements.depositMessage.textContent = status.message || '设备就绪'
+      elements.depositProgressFill.style.width = `${clamp(status.progress)}%`
+      elements.clearBinButton.disabled = status.status === 'processing'
+      elements.controlState.textContent = status.phase || '等待投放'
+      updateDepositButton()
+
+      elements.compartmentGrid.replaceChildren()
+      ;(bin.compartments || []).forEach(compartment => {
+        const item = document.createElement('div')
+        item.className = `compartment${compartment.full ? ' full' : ''}`
+        item.innerHTML = `<span class="compartment-name"></span><strong class="compartment-value"></strong><span class="compartment-foot"></span>`
+        item.querySelector('.compartment-name').textContent = compartment.label
+        item.querySelector('.compartment-value').textContent = `${formatNumber(compartment.fillRate)}%`
+        item.querySelector('.compartment-value').style.color = compartment.full ? 'var(--red)' : categoryColors[compartment.key]
+        item.querySelector('.compartment-foot').textContent = `${formatNumber(compartment.weightKg, 2)} kg · ${compartment.count} 件`
+        elements.compartmentGrid.appendChild(item)
+      })
+      elements.depositSummary.textContent = bin.fullAlarm
+        ? '存在满载仓位，请及时模拟清运'
+        : `总重 ${formatNumber(bin.totalWeightKg, 2)} kg，四分类仓运行正常`
+    }
+
+    function buildEvents(status) {
+      const events = []
+      const now = new Date().toISOString()
+      if (status.last_command) {
+        events.push({ time: status.last_command.issuedAt || now, level: 'INFO', tone: 'info', message: `控制指令：${status.last_command.action || '未知动作'}` })
+      }
+      if (status.last_execution) {
+        events.push({ time: status.last_execution.timestamp ? Number(status.last_execution.timestamp) * 1000 : now, level: 'INFO', tone: 'info', message: `执行结果：${status.last_execution.status || status.last_execution.message || '已上报'}` })
+      }
+      if (status.last_notify) {
+        const notify = status.last_notify
+        const userName = notify.user && notify.user.username
+        events.push({ time: notify.timestamp || now, level: 'NOTICE', tone: '', message: userName ? `用户 ${userName} 已连接设备` : `后端通知：${notify.type || notify.message || '已接收'}` })
+      }
+      if (status.telemetry) {
+        const response = String(status.telemetry.server_response || '')
+        events.push({ time: status.telemetry.timestamp ? Number(status.telemetry.timestamp) * 1000 : now, level: response.startsWith('200') ? 'INFO' : 'WARN', tone: response.startsWith('200') ? '' : 'warn', message: `遥测上报：${response || '等待响应'}` })
+      }
+      if (status.last_report) {
+        events.push({ time: status.last_report.timestamp || now, level: 'INFO', tone: 'info', message: `位置上报：${status.last_report.server_response || '已提交'}` })
+      }
+      if (status.command_error) {
+        events.push({ time: now, level: 'ERROR', tone: 'error', message: `指令轮询：${status.command_error}` })
+      }
+      ;(((status.bin || {}).history) || []).forEach(item => {
+        const syncText = item.backendStatus === 'synced'
+          ? (item.hasUser ? `，后端已同步 · 积分 +${item.pointsAwarded || 0}` : '，后端已保存 · 未配对用户')
+          : item.backendStatus === 'failed'
+            ? `，上报失败：${item.backendMessage || '未知错误'}`
+            : '，等待后端同步'
+        events.push({
+          time: item.time,
+          level: 'SORTED',
+          tone: item.category === 'hazardous' ? 'error' : 'info',
+          message: `${item.item} → ${item.categoryLabel}，${formatNumber(item.weightKg, 2)} kg，置信度 ${Math.round(Number(item.confidence) * 100)}%${syncText}`
+        })
+      })
+      return events.slice(0, 12)
+    }
+
+    function renderEvents(status) {
+      const events = buildEvents(status)
+      elements.eventCount.textContent = `${events.length} 条事件`
+      elements.eventsBody.replaceChildren()
+      if (!events.length) {
+        const empty = document.createElement('div')
+        empty.className = 'events-empty'
+        empty.textContent = '等待设备上报与后端通知'
+        elements.eventsBody.appendChild(empty)
+        return
+      }
+      events.forEach(event => {
+        const row = document.createElement('div')
+        row.className = 'event-row'
+        const time = document.createElement('span')
+        time.className = 'event-time'
+        time.textContent = formatTime(event.time)
+        const dot = document.createElement('span')
+        dot.className = `event-dot ${event.tone || ''}`
+        const level = document.createElement('span')
+        level.className = 'event-level'
+        level.textContent = event.level
+        const message = document.createElement('span')
+        message.className = 'event-message'
+        message.title = event.message
+        message.textContent = event.message
+        row.append(time, dot, level, message)
+        elements.eventsBody.appendChild(row)
+      })
+    }
+
+    function renderStatus(status) {
+      appState.status = status
+      const mode = status.mode === 'robot' ? 'robot' : 'bin'
+      const telemetry = status.telemetry || {}
+      const robot = status.robot || {}
+      const bin = status.bin || {}
+      const battery = robot.batteryPct ?? telemetry.batteryPct
+      const latitude = robot.latitude ?? telemetry.latitude ?? (status.last_report && status.last_report.latitude)
+      const longitude = robot.longitude ?? telemetry.longitude ?? (status.last_report && status.last_report.longitude)
+      const robotStatus = robot.status || telemetry.deviceState || (mode === 'robot' ? 'idle' : 'serving')
+      const phase = robot.phase || telemetry.currentPhase || stateLabels[robotStatus] || '正常服务'
+      const progress = mode === 'robot' ? clamp(robot.progress ?? telemetry.progress) : clamp(bin.maxFillRate ?? telemetry.fillRate)
+      const workflowStage = mapSortingWorkflowStage({
+        mode,
+        status: robotStatus,
+        deviceState: telemetry.deviceState,
+        phase,
+        progress
+      })
+
+      document.getElementById('onlineStatus').style.color = ''
+      document.getElementById('onlineStatus').lastElementChild.textContent = '模拟器在线'
+      setModeUi(mode)
+      elements.deviceId.textContent = status.device_id ?? '--'
+      const pairedUser = status.paired_user || null
+      elements.pairedUser.textContent = pairedUser
+        ? `${pairedUser.username} · UID ${pairedUser.id ?? '--'}`
+        : '等待用户扫码连接'
+      elements.pairingDot.style.color = pairedUser ? 'var(--green)' : 'var(--subtle)'
+      elements.connectionTitle.textContent = pairedUser ? `已配对 · ${pairedUser.username}` : '设备连接可用'
+      elements.connectLink.textContent = status.scan_url || '等待二维码生成'
+      elements.connectLink.title = status.scan_url || ''
+      elements.tokenValue.textContent = maskToken(status.token)
+      elements.tokenValue.dataset.rawValue = status.token || ''
+      const qrRevision = String(status.qr_revision || '')
+      if (qrRevision && qrRevision !== appState.qrRevision) {
+        appState.qrRevision = qrRevision
+        elements.qrImage.src = `/qr?revision=${encodeURIComponent(qrRevision)}`
+      }
+      elements.robotState.textContent = stateLabels[robotStatus] || robotStatus
+      elements.robotPhase.textContent = phase
+      elements.summaryState.textContent = mode === 'robot' && robotStatus === 'emergency_stopped' ? '设备已急停' : '设备在线'
+      elements.batteryValue.textContent = `${formatNumber(battery)}%`
+      elements.positionValue.textContent = Number.isFinite(Number(latitude)) ? `${Number(latitude).toFixed(3)}` : '--'
+      elements.positionFoot.textContent = Number.isFinite(Number(longitude)) ? `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}` : '纬度 / 经度'
+      elements.metricThreeValue.textContent = `${formatNumber(progress)}%`
+      elements.progressFill.style.width = `${progress}%`
+      elements.metricFourValue.textContent = mode === 'robot' ? phase : `${formatNumber(bin.totalWeightKg ?? telemetry.weightKg)} kg`
+      if (mode === 'robot') elements.controlState.textContent = stateLabels[robotStatus] || robotStatus
+      elements.telemetrySource.textContent = mode === 'robot' ? '虚拟机器人遥测' : '垃圾桶遥测'
+      elements.workflowPlayer.setStage(workflowStage)
+      if (mode === 'robot' && robotStatus === 'running' && workflowStage !== 'error') {
+        elements.workflowPlayer.setAttribute('autoplay', '')
+        elements.workflowPlayer.play()
+      } else {
+        elements.workflowPlayer.removeAttribute('autoplay')
+        elements.workflowPlayer.pause()
+      }
+      elements.lastUpdated.textContent = `更新于 ${formatTime()}`
+      if (mode === 'bin') renderBin(bin)
+      renderEvents(status)
+    }
+
+    function scheduleStatusRefresh(delay) {
+      window.clearTimeout(appState.statusPollTimer)
+      if (appState.statusPollingStopped) return
+      appState.statusPollTimer = window.setTimeout(fetchStatus, delay)
+    }
+
+    async function fetchStatus() {
+      if (appState.refreshing) return
+      window.clearTimeout(appState.statusPollTimer)
+      appState.refreshing = true
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 5000)
+      try {
+        const response = await fetch(`/status?t=${Date.now()}`, {
+          cache: 'no-store',
+          signal: controller.signal
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        renderStatus(await response.json())
+        appState.statusFailures = 0
+      } catch (error) {
+        appState.statusFailures += 1
+        document.getElementById('onlineStatus').style.color = 'var(--red)'
+        document.getElementById('onlineStatus').lastElementChild.textContent = '状态连接中断'
+        elements.lastUpdated.textContent = '状态同步失败'
+      } finally {
+        window.clearTimeout(timeout)
+        appState.refreshing = false
+        const busy = appState.textImageLoading || appState.textImageGenerating || appState.recognitionPending
+        const delay = appState.statusFailures
+          ? Math.min(15000, 3000 * (2 ** Math.min(2, appState.statusFailures - 1)))
+          : busy ? 5000 : 2000
+        scheduleStatusRefresh(delay)
+      }
+    }
+
+    async function postJson(path, payload) {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok || body.ok === false) throw new Error(body.message || `请求失败：${response.status}`)
+      return body
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(reader.error || new Error('投放图片读取失败'))
+        reader.readAsDataURL(blob)
+      })
+    }
+
+    function canvasToBlob(canvas, type, quality) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(
+          blob => blob ? resolve(blob) : reject(new Error('投放图片压缩失败')),
+          type,
+          quality
+        )
+      })
+    }
+
+    async function compressImageForUpload(sourceBlob) {
+      const bitmap = await createImageBitmap(sourceBlob)
+      const attempts = [
+        { maxDimension: 384, quality: 0.58 },
+        { maxDimension: 320, quality: 0.5 },
+        { maxDimension: 256, quality: 0.42 }
+      ]
+      const targetBytes = 220 * 1024
+      let result = null
+      try {
+        for (const attempt of attempts) {
+          const scale = Math.min(1, attempt.maxDimension / Math.max(bitmap.width, bitmap.height))
+          const width = Math.max(1, Math.round(bitmap.width * scale))
+          const height = Math.max(1, Math.round(bitmap.height * scale))
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const context = canvas.getContext('2d', { alpha: false })
+          if (!context) throw new Error('浏览器无法压缩投放图片')
+          context.fillStyle = '#ffffff'
+          context.fillRect(0, 0, width, height)
+          context.drawImage(bitmap, 0, 0, width, height)
+          const blob = await canvasToBlob(canvas, 'image/jpeg', attempt.quality)
+          result = { blob, width, height }
+          if (blob.size <= targetBytes) break
+        }
+      } finally {
+        bitmap.close?.()
+      }
+      if (!result) throw new Error('投放图片压缩失败')
+      return {
+        dataUrl: await blobToDataUrl(result.blob),
+        bytes: result.blob.size,
+        width: result.width,
+        height: result.height
+      }
+    }
+
+    async function switchMode(mode) {
+      if (appState.status && appState.status.mode === mode) return
+      document.querySelectorAll('.mode-button').forEach(button => { button.disabled = true })
+      try {
+        await postJson('/mode', { mode })
+        await fetchStatus()
+        const revision = String((appState.status && appState.status.qr_revision) || '')
+        if (revision) elements.qrImage.src = `/qr?revision=${encodeURIComponent(revision)}`
+        showToast(mode === 'robot' ? '已切换为虚拟机器人' : '已切换为垃圾桶设备')
+      } catch (error) {
+        showToast(error.message)
+      } finally {
+        document.querySelectorAll('.mode-button').forEach(button => { button.disabled = false })
+      }
+    }
+
+    async function controlRobot(action, button) {
+      if (!appState.status || appState.status.mode !== 'robot') return
+      const original = button.innerHTML
+      button.disabled = true
+      button.textContent = '执行中'
+      try {
+        await postJson('/control', { action })
+        showToast(`指令已执行：${button.dataset.action === 'emergency_stop' ? '急停' : action}`)
+        await fetchStatus()
+      } catch (error) {
+        showToast(error.message)
+      } finally {
+        button.innerHTML = original
+        button.disabled = false
+      }
+    }
+
+    async function depositWaste() {
+      if (!appState.status || appState.status.mode !== 'bin') return
+      if (!appState.textImageBlob || appState.depositImageConsumed) {
+        showToast('请先生成投放图并完成分类确认')
+        return
+      }
+      elements.depositButton.disabled = true
+      elements.depositButton.textContent = '上传图片中'
+      try {
+        const recognition = appState.recognition || {}
+        const uploadImage = await compressImageForUpload(appState.textImageBlob)
+        setTextImageStatus(
+          `正在上传压缩图片：${uploadImage.width}×${uploadImage.height} · ${Math.max(1, Math.round(uploadImage.bytes / 1024))} KB`,
+          { pct: 100 }
+        )
+        await postJson('/deposit', {
+          category: appState.selectedCategory,
+          item: elements.wasteItemSelect.value,
+          weightKg: Number(elements.wasteWeightInput.value),
+          image_Base64: uploadImage.dataUrl,
+          imageUploadBytes: uploadImage.bytes,
+          imageUploadWidth: uploadImage.width,
+          imageUploadHeight: uploadImage.height,
+          imagePrompt: elements.textImagePrompt.value.trim(),
+          imagePresetId: appState.selectedTextImagePreset,
+          recognitionSource: recognition.source || 'manual',
+          detectedClass: recognition.detectedClass || '',
+          recognitionConfidence: recognition.confidence,
+          recognitionConflict: appState.recognitionConflict
+        })
+        appState.depositImageConsumed = true
+        setTextImageStatus('投放图片和分类已提交；再次投放请重新生成。', { pct: 100 })
+        showToast('已放入识别区，开始自动分类')
+        await fetchStatus()
+      } catch (error) {
+        showToast(error.message)
+      } finally {
+        updateDepositButton()
+      }
+    }
+
+    async function clearBin() {
+      elements.clearBinButton.disabled = true
+      try {
+        await postJson('/bin/reset', {})
+        showToast('四个分类仓已完成模拟清运')
+        await fetchStatus()
+      } catch (error) {
+        showToast(error.message)
+      } finally {
+        elements.clearBinButton.disabled = false
+      }
+    }
+
+    async function copyText(value, label) {
+      if (!value) return showToast(`${label}暂无内容`)
+      try {
+        await navigator.clipboard.writeText(value)
+        showToast(`${label}已复制`)
+      } catch (error) {
+        const input = document.createElement('textarea')
+        input.value = value
+        document.body.appendChild(input)
+        input.select()
+        document.execCommand('copy')
+        input.remove()
+        showToast(`${label}已复制`)
+      }
+    }
+
+    elements.themeButton.addEventListener('click', () => {
+      setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')
+    })
+    elements.binModeButton.addEventListener('click', () => switchMode('bin'))
+    elements.robotModeButton.addEventListener('click', () => switchMode('robot'))
+    elements.refreshQrButton.addEventListener('click', () => {
+      const revision = String((appState.status && appState.status.qr_revision) || '')
+      if (!revision) {
+        showToast('二维码尚未生成')
+        return
+      }
+      elements.qrImage.src = `/qr?revision=${encodeURIComponent(revision)}&t=${Date.now()}`
+      showToast('二维码已刷新')
+    })
+    document.querySelectorAll('[data-category]').forEach(button => {
+      button.addEventListener('click', () => {
+        selectCategory(button.dataset.category)
+        markRecognitionManualCorrection()
+      })
+    })
+    elements.wasteItemSelect.addEventListener('change', markRecognitionManualCorrection)
+    elements.depositButton.addEventListener('click', depositWaste)
+    elements.clearBinButton.addEventListener('click', clearBin)
+    elements.textImagePresets.addEventListener('click', event => {
+      const button = event.target.closest('[data-preset]')
+      if (button) selectTextImagePreset(button.dataset.preset)
+    })
+    elements.textImagePrompt.addEventListener('input', () => {
+      const preset = TEXT_TO_IMAGE_PRESETS.find(item => item.id === appState.selectedTextImagePreset)
+      if (!preset || elements.textImagePrompt.value !== preset.prompt) {
+        selectTextImagePreset('custom', { keepPrompt: true })
+      } else {
+        updateTextImageButton()
+      }
+    })
+    elements.textImageButton.addEventListener('click', generateTextImage)
+    document.querySelectorAll('[data-action]').forEach(button => {
+      button.addEventListener('click', () => controlRobot(button.dataset.action, button))
+    })
+    document.querySelectorAll('[data-copy-target]').forEach(button => {
+      button.addEventListener('click', () => {
+        const target = document.getElementById(button.dataset.copyTarget)
+        const value = button.dataset.copyRaw === 'token' ? (target.dataset.rawValue || '') : target.textContent
+        copyText(value, button.getAttribute('aria-label').replace('复制', '').trim())
+      })
+    })
+
+    initTheme()
+    setModeUi('bin')
+    selectTextImagePreset('plastic-bottle')
+    initTextToImage()
+    fetchStatus()
+    window.setInterval(() => { elements.systemClock.textContent = formatTime() }, 1000)
+    elements.systemClock.textContent = formatTime()
+    window.addEventListener('pagehide', () => {
+      appState.statusPollingStopped = true
+      window.clearTimeout(appState.statusPollTimer)
+      elements.workflowPlayer.pause?.()
+      cleanupTextImageUrl()
+      disposeTextToImage()
+    })
+  </script>
+</body>
+</html>

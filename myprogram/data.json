@@ -1,0 +1,49 @@
+{
+    "points": [
+        [
+            394,
+            12
+        ],
+        [
+            1011,
+            22
+        ],
+        [
+            1009,
+            624
+        ],
+        [
+            400,
+            610
+        ]
+    ],
+    "vflip": false,
+    "hflip": false,
+    "rotate90": false,
+    "CLAHE": false,
+    "sharpening": false,
+    "fliter": true,
+    "width": 480,
+    "height": 480,
+    "full_distance": 5.0,
+    "full_time": 3.0,
+    "detect_threshold": 8000.0,
+    "catch_threshold": 10.0,
+    "axis-width": 2300,
+    "axis-height": 1000,
+    "axis-x1": 0,
+    "axis-y1": 0,
+    "axis-x2": 479,
+    "axis-y2": 479,
+    "x": 29999,
+    "y": 24999,
+    "z": false,
+    "catch": 0,
+    "barrier1": 0,
+    "barrier2": 0,
+    "barrier3": 0,
+    "barrier4": 0,
+    "platformT": 0,
+    "platformR": 0,
+    "rotate": 0
+}

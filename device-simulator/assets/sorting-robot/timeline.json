@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "sequence": [
+    "scan",
+    "approach",
+    "grasp",
+    "transport",
+    "place",
+    "release",
+    "return"
+  ],
+  "stages": {
+    "idle": {
+      "durationMs": 1000,
+      "from": {
+        "robotX": 700,
+        "waist": 0,
+        "head": 0,
+        "leftShoulder": -10,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 700,
+        "waist": 0,
+        "head": 0,
+        "leftShoulder": -10,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 0
+      }
+    },
+    "scan": {
+      "durationMs": 900,
+      "from": {
+        "robotX": 630,
+        "waist": 0,
+        "head": -10,
+        "leftShoulder": -12,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": true,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 630,
+        "waist": 1,
+        "head": 10,
+        "leftShoulder": -12,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": true,
+        "bottleDrop": 0
+      }
+    },
+    "approach": {
+      "durationMs": 1200,
+      "from": {
+        "robotX": 630,
+        "waist": 0,
+        "head": 8,
+        "leftShoulder": -12,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": true,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 500,
+        "waist": 4,
+        "head": -12,
+        "leftShoulder": -28,
+        "leftElbow": 26,
+        "rightShoulder": 10,
+        "rightElbow": -14,
+        "holdBottle": false,
+        "showTarget": true,
+        "bottleDrop": 0
+      }
+    },
+    "grasp": {
+      "durationMs": 1000,
+      "from": {
+        "robotX": 500,
+        "waist": 4,
+        "head": -8,
+        "leftShoulder": -28,
+        "leftElbow": 26,
+        "rightShoulder": 10,
+        "rightElbow": -14,
+        "holdBottle": false,
+        "showTarget": true,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 500,
+        "waist": 8,
+        "head": -8,
+        "leftShoulder": -42,
+        "leftElbow": 46,
+        "rightShoulder": 10,
+        "rightElbow": -14,
+        "holdBottle": true,
+        "showTarget": true,
+        "bottleDrop": 0
+      },
+      "holdBottleAt": 0.55
+    },
+    "transport": {
+      "durationMs": 1800,
+      "from": {
+        "robotX": 500,
+        "waist": 6,
+        "head": -6,
+        "leftShoulder": -36,
+        "leftElbow": 40,
+        "rightShoulder": 8,
+        "rightElbow": -12,
+        "holdBottle": true,
+        "showTarget": false,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 1030,
+        "waist": -2,
+        "head": 5,
+        "leftShoulder": -18,
+        "leftElbow": 20,
+        "rightShoulder": 4,
+        "rightElbow": -6,
+        "holdBottle": true,
+        "showTarget": false,
+        "bottleDrop": 0
+      }
+    },
+    "place": {
+      "durationMs": 1200,
+      "from": {
+        "robotX": 1030,
+        "waist": -2,
+        "head": 5,
+        "leftShoulder": -18,
+        "leftElbow": 20,
+        "rightShoulder": 4,
+        "rightElbow": -6,
+        "holdBottle": true,
+        "showTarget": false,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 1030,
+        "waist": 6,
+        "head": -6,
+        "leftShoulder": -38,
+        "leftElbow": 42,
+        "rightShoulder": 4,
+        "rightElbow": -6,
+        "holdBottle": true,
+        "showTarget": false,
+        "bottleDrop": 0
+      }
+    },
+    "release": {
+      "durationMs": 700,
+      "from": {
+        "robotX": 1030,
+        "waist": 4,
+        "head": -5,
+        "leftShoulder": -38,
+        "leftElbow": 44,
+        "rightShoulder": 4,
+        "rightElbow": -6,
+        "holdBottle": true,
+        "showTarget": false,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 1030,
+        "waist": 4,
+        "head": -5,
+        "leftShoulder": -38,
+        "leftElbow": 44,
+        "rightShoulder": 4,
+        "rightElbow": -6,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 1
+      },
+      "holdBottleUntil": 0.5
+    },
+    "return": {
+      "durationMs": 1300,
+      "from": {
+        "robotX": 1030,
+        "waist": 4,
+        "head": -5,
+        "leftShoulder": -32,
+        "leftElbow": 34,
+        "rightShoulder": 4,
+        "rightElbow": -6,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 700,
+        "waist": 0,
+        "head": 0,
+        "leftShoulder": -10,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 0
+      }
+    },
+    "completed": {
+      "durationMs": 1000,
+      "from": {
+        "robotX": 700,
+        "waist": 0,
+        "head": 0,
+        "leftShoulder": -10,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 0
+      },
+      "to": {
+        "robotX": 700,
+        "waist": 0,
+        "head": 0,
+        "leftShoulder": -10,
+        "leftElbow": 10,
+        "rightShoulder": 8,
+        "rightElbow": -10,
+        "holdBottle": false,
+        "showTarget": false,
+        "bottleDrop": 0
+      }
+    }
+  }
+}

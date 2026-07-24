@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "sourceSize": {
+    "width": 564,
+    "height": 767
+  },
+  "sceneSize": {
+    "width": 1600,
+    "height": 900
+  },
+  "pivots": {
+    "waist": [
+      326,
+      322
+    ],
+    "head": [
+      335,
+      112
+    ],
+    "leftShoulder": [
+      230,
+      222
+    ],
+    "leftElbow": [
+      221,
+      325
+    ],
+    "rightShoulder": [
+      420,
+      194
+    ],
+    "rightElbow": [
+      438,
+      324
+    ]
+  },
+  "anchors": {
+    "bottleCenter": [
+      59.5,
+      360.5
+    ]
+  },
+  "layers": {
+    "base": "00_base.png",
+    "torso": "01_torso.png",
+    "head": "02_head.png",
+    "rightUpperArm": "03_right_upper_arm.png",
+    "rightLowerArmHand": "04_right_lower_arm_hand.png",
+    "rightShoulderCover": "05_right_shoulder_cover.png",
+    "leftShoulderCover": "06_left_shoulder_cover.png",
+    "leftUpperArm": "07_left_upper_arm.png",
+    "leftLowerEmptyHand": "08_left_lower_empty_hand.png",
+    "leftElbowCover": "09_left_elbow_cover.png",
+    "leftJointCleanup": "10_left_joint_cleanup.png",
+    "bottle": "11_bottle.png",
+    "sockets": "12_sockets.png",
+    "bodyRightCover": "13_body_right_cover.png"
+  }
+}

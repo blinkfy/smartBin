@@ -1,0 +1,9 @@
+train: F:/ultralytics-main/data/train.txt
+val: F:/ultralytics-main/data/val.txt
+test: F:/ultralytics-main/data/test.txt
+ 
+nc: 12 # 填写类别数
+ 
+names: ['potato', 'rabbitcut', 'battery1', 'battery5', 'bottle', 'brick', 'can', 'china', 'stone', 'drug', 'drugbag', 'mooli']  # 要和voc_label.py中的类别数目顺序一模一样
+ 
+# train,val,test的路径根据自己情况而定
