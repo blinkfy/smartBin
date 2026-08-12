@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "state": "complete",
+  "valid": true,
+  "scope": "plan_a_confirmatory_canonical_tex_revision",
+  "markers": {
+    "begin": "% BEGIN AUTO PLAN_A_CONFIRMATORY",
+    "end": "% END AUTO PLAN_A_CONFIRMATORY",
+    "count_in_revised_source": 2
+  },
+  "changes": [
+    "inserted audited confirmatory TeX fragment before uncertainty diagnostics",
+    "replaced obsolete pending-experiment limitation text",
+    "added a boundary-preserving confirmatory conclusion paragraph"
+  ],
+  "source_bindings": {
+    "pre_revision_main": {
+      "path": "paper_rewriting_output/revision_snapshots/pre_plan_a_confirmatory/main.20260730_190032.tex",
+      "size_bytes": 37175,
+      "sha256": "e717189263781c4b38dfcbf4c4814a3ccbc657ed410f6225f9ae487fab2d1f74"
+    },
+    "confirmatory_addendum": {
+      "path": "reports/qwen-material/plan-a-confirmatory-outcome/MANUSCRIPT_ADDENDUM.tex",
+      "size_bytes": 3841,
+      "sha256": "d943159b29af95c8c6505f41b9cd4173fe7881229ea3a728897043f5452bcf5d"
+    },
+    "confirmatory_outcome": {
+      "path": "reports/qwen-material/plan-a-confirmatory-outcome/OUTCOME.json",
+      "size_bytes": 38353,
+      "sha256": "c7608cdbde19743ada82f9e6bc50411e3601ff5d2023de3a1c2ad3fa72b871d1"
+    },
+    "updater_source": {
+      "path": "apply_plan_a_confirmatory_manuscript_update.py",
+      "size_bytes": 8993,
+      "sha256": "2bf4ccd3452ae9ab3050e6bfd2977e2bf9f4facf41165194b37b2792e2ab21ff"
+    }
+  },
+  "revised_main": {
+    "path": "paper_rewriting_output/final_paper/main.tex",
+    "size_bytes": 41575,
+    "sha256": "9c3f83d89c25e8c247d23a55165914a2d1ae9a341f95969a43b5208396c52de0"
+  },
+  "errors": []
+}

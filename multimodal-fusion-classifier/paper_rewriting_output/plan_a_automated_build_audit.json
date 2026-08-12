@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "state": "automated_build_complete_visual_qa_pending",
+  "valid": true,
+  "scope": "plan_a_unattended_docx_pdf_content_audit",
+  "visual_qa_complete": false,
+  "submission_ready": false,
+  "next_required_action": "render and inspect every final DOCX/PDF page before release",
+  "document": {
+    "docx_paragraph_count": 340,
+    "docx_table_count": 8,
+    "pdf_page_count": 13
+  },
+  "source_bindings": {
+    "main": {
+      "path": "paper_rewriting_output/final_paper/main.tex",
+      "size_bytes": 41575,
+      "sha256": "9c3f83d89c25e8c247d23a55165914a2d1ae9a341f95969a43b5208396c52de0"
+    },
+    "docx": {
+      "path": "paper_rewriting_output/final_paper/paper.zh.docx",
+      "size_bytes": 1077078,
+      "sha256": "d695647a003ff94e5c4f53edf9ef2d69511e1fc340c5fab55d219be084c786d9"
+    },
+    "pdf": {
+      "path": "paper_rewriting_output/final_paper/paper.pdf",
+      "size_bytes": 867396,
+      "sha256": "bab167da7d1eaddf68ad2fac4c9d6a11f34d568a197225d788dbd72737ba86e9"
+    },
+    "pdf_alias": {
+      "path": "paper_rewriting_output/final_paper/main.pdf",
+      "size_bytes": 867396,
+      "sha256": "bab167da7d1eaddf68ad2fac4c9d6a11f34d568a197225d788dbd72737ba86e9"
+    },
+    "revision_audit": {
+      "path": "paper_rewriting_output/plan_a_confirmatory_revision_audit.json",
+      "size_bytes": 1697,
+      "sha256": "c2aa14350802466720bd53fe488ab28e53909847144d90a97ecb304ff7bda441"
+    },
+    "confirmatory_outcome": {
+      "path": "reports/qwen-material/plan-a-confirmatory-outcome/OUTCOME.json",
+      "size_bytes": 38353,
+      "sha256": "c7608cdbde19743ada82f9e6bc50411e3601ff5d2023de3a1c2ad3fa72b871d1"
+    }
+  },
+  "errors": []
+}

@@ -1,0 +1,209 @@
+{
+  "classes": [
+    {
+      "name": "potato",
+      "description": "完整的土豆或块状马铃薯，有浅褐色表皮，属于厨余有机物"
+    },
+    {
+      "name": "rabbitcut",
+      "description": "切分后的兔肉或带骨肉块，呈红粉色并可能含脂肪组织"
+    },
+    {
+      "name": "battery1",
+      "description": "一号圆柱形干电池，体积较大，金属正负极明显"
+    },
+    {
+      "name": "battery5",
+      "description": "五号圆柱形干电池，细长金属外壳，属于有害垃圾"
+    },
+    {
+      "name": "bottle",
+      "description": "普通透明或有色塑料饮料瓶，带瓶口和瓶身标签"
+    },
+    {
+      "name": "brick",
+      "description": "红色或灰色建筑砖块，表面粗糙且为规则长方体"
+    },
+    {
+      "name": "can",
+      "description": "圆柱形金属易拉罐，具有拉环顶盖和印刷包装"
+    },
+    {
+      "name": "china",
+      "description": "破损陶瓷或瓷片，坚硬光滑，断面锋利"
+    },
+    {
+      "name": "stone",
+      "description": "天然石块或碎石，形状不规则，表面粗糙"
+    },
+    {
+      "name": "drug",
+      "description": "药片泡罩板或散装药品，属于过期药物类有害垃圾"
+    },
+    {
+      "name": "drugbag",
+      "description": "软质药品包装袋，带药品文字或铝塑复合包装"
+    },
+    {
+      "name": "mooli",
+      "description": "完整白萝卜或萝卜段，白色肉质并可能带绿色叶柄"
+    },
+    {
+      "name": "battery",
+      "description": "常见废旧电池，圆柱或方形，有金属电极，属于有害垃圾"
+    },
+    {
+      "name": "bottle2",
+      "description": "另一类塑料或玻璃瓶容器，具有清晰瓶颈与中空瓶身"
+    },
+    {
+      "name": "drugbox",
+      "description": "硬纸质药品盒，表面印有药名、剂量或医药标识"
+    },
+    {
+      "name": "papercup",
+      "description": "一次性纸杯，圆台形薄壁容器，杯口呈圆环"
+    },
+    {
+      "name": "capsule",
+      "description": "药用胶囊或胶囊包装，呈小型双色椭圆柱形"
+    },
+    {
+      "name": "potatocut",
+      "description": "切开的土豆块，可见淡黄色内部和局部褐色表皮"
+    },
+    {
+      "name": "paper",
+      "description": "废纸张、纸片或折叠纸制品，薄而平整"
+    }
+  ],
+  "model": {
+    "yolo_weights": "../yolo11s-seg.pt",
+    "clip_model": "openai/clip-vit-base-patch16",
+    "clip_local_files_only": false,
+    "feature_dim": 512,
+    "attention_dim": 128,
+    "attention_heads": 8,
+    "dropout": 0.3,
+    "film_gamma_init": 1.0,
+    "film_beta_init": 0.1,
+    "scale_prior": [
+      0.3,
+      0.5,
+      0.2
+    ],
+    "text_temperature": 0.07,
+    "sensor_log_variance_min": -3.0,
+    "sensor_log_variance_max": 2.0,
+    "sensor_reliability_hidden_dim": 32,
+    "sensor_reliability_init": 0.85,
+    "enabled_modalities": [
+      "visual",
+      "text",
+      "sensor"
+    ],
+    "fusion_mode": "attention",
+    "film_enabled": true,
+    "sensor_reliability_enabled": true,
+    "sensor_grid_quality_enabled": true,
+    "sensor_grid_quality_hidden_dim": 16,
+    "sensor_cross_modal_quality_enabled": true,
+    "sensor_grid_decoder_hidden_dim": 64,
+    "sensor_cross_modal_quality_hidden_dim": 32,
+    "freeze_yolo_layers": 5,
+    "freeze_clip_text_layers": 3
+  },
+  "loss": {
+    "ce_weight": 1.0,
+    "focal_weight": 1.0,
+    "alpha": 0.25,
+    "gamma": 2.0,
+    "reconstruction_weight": 0.1,
+    "calibration_weight": 0.3,
+    "variance_prior_weight": 0.1,
+    "variance_prior_target": -2.0,
+    "calibration_clean_weight": 3.0,
+    "sensor_grid_reconstruction_weight": 0.5,
+    "calibration_ranking_weight": 0.0,
+    "calibration_ranking_margin": 0.05
+  },
+  "robustness": {
+    "sensor_degradation": {
+      "enabled": true,
+      "missing_probability": 0.1,
+      "noise_probability": 0.5,
+      "noise_std": 0.03,
+      "bias_probability": 0.25,
+      "bias_strength": 0.15,
+      "stuck_probability": 0.15,
+      "quality_scale": 0.25,
+      "noise_std_range": [
+        0.02,
+        0.15
+      ]
+    }
+  },
+  "data": {
+    "train_manifest": "data/qwen-material/train.jsonl",
+    "val_manifest": "data/qwen-material/val.jsonl",
+    "test_manifest": "data/qwen-material/test.jsonl",
+    "sensor_manifest": "data/qwen-material/sensors.jsonl",
+    "image_size": 480
+  },
+  "preprocess": {
+    "enabled": true,
+    "bilateral": {
+      "diameter": 3,
+      "sigma_space": 1.0,
+      "sigma_color": 0.8
+    },
+    "clahe": {
+      "enabled": true,
+      "brightness_threshold": 0.35,
+      "clip_limit": 2.0,
+      "tile_grid_size": [
+        8,
+        8
+      ]
+    },
+    "laplacian": {
+      "enabled": true,
+      "kernel_size": 3,
+      "strength": 1.0
+    },
+    "affine_matrix": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ]
+    ]
+  },
+  "training": {
+    "seed": 43,
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "weight_decay": 1e-05,
+    "epochs": 100,
+    "warmup_epochs": 5,
+    "num_workers": 0,
+    "checkpoint_dir": "checkpoints/confirmatory-ablations/v3_loss_components/v3_no_ranking/seed43"
+  },
+  "experiment": {
+    "name": "v3_no_ranking_seed43",
+    "group": "confirmatory_v3_loss_component_ablation",
+    "description": "Matched-seed v3 without pairwise reliability-ranking supervision; all model paths and other losses remain enabled",
+    "formal_retraining_required": true,
+    "reference_checkpoint": null,
+    "ablation_of": "full_cross_modal_quality",
+    "ablation_scope": "pairwise_reliability_ranking_supervision",
+    "intervention_field": "loss.calibration_ranking_weight",
+    "matched_training_seed": 43,
+    "long_horizon_worker_policy": "workers=0 after the workers=4 confirmatory run stalled at epoch 69"
+  }
+}

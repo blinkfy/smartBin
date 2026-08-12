@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import importlib
 import math
@@ -15,8 +16,9 @@ import torch
 from torch import Tensor, nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 
+from .checkpoints import load_checkpoint
 from .losses import JointClassificationLoss
 from .model import PROJECT_ROOT, build_production_model
 
@@ -192,7 +194,7 @@ def load_cropped_image(
         array_uint8 = np.asarray(crop, dtype=np.uint8).copy()
     if preprocess and bool(preprocess.get("enabled", False)):
         array_uint8 = patent_preprocess(array_uint8, preprocess)
-    resized = Image.fromarray(array_uint8, mode="RGB").resize(
+    resized = Image.fromarray(array_uint8).resize(
         (image_size, image_size), Image.Resampling.BILINEAR
     )
     array = np.asarray(resized, dtype=np.float32).copy() / 255.0
@@ -288,6 +290,7 @@ class ManifestDataset(Dataset[dict[str, Any]]):
         image_size: int = 640,
         sensor_manifest: str | Path | None = None,
         preprocess: dict[str, Any] | None = None,
+        load_images: bool = True,
     ) -> None:
         self.manifest_path = resolve_project_path(manifest_path)
         if not self.manifest_path.is_file():
@@ -298,6 +301,7 @@ class ManifestDataset(Dataset[dict[str, Any]]):
         self.manifest_dir = self.manifest_path.parent
         self.image_size = int(image_size)
         self.preprocess = preprocess
+        self.load_images = bool(load_images)
         self.class_to_id = {name: index for index, name in enumerate(class_names)}
         self.sensor_sidecar: dict[str, Any] | None = None
         if sensor_manifest:
@@ -353,12 +357,19 @@ class ManifestDataset(Dataset[dict[str, Any]]):
             )
         return {
             "sample_id": sample_id,
-            "image": load_cropped_image(
-                record["image_path"],
-                record["bbox"],
-                manifest_dir=self.manifest_dir,
-                image_size=self.image_size,
-                preprocess=self.preprocess,
+            "source_image_id": str(
+                record.get("source_image_id", sample_id)
+            ),
+            "image": (
+                load_cropped_image(
+                    record["image_path"],
+                    record["bbox"],
+                    manifest_dir=self.manifest_dir,
+                    image_size=self.image_size,
+                    preprocess=self.preprocess,
+                )
+                if self.load_images
+                else torch.zeros(3, self.image_size, self.image_size)
             ),
             "sensor": load_sensor_grid(
                 record,
@@ -375,6 +386,422 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+class _SingleWorkerOrderRandomSampler(Sampler[int]):
+    """Reproduce DataLoader(shuffle=True, num_workers=0) RNG consumption."""
+
+    def __init__(self, dataset: Dataset, generator: torch.Generator) -> None:
+        self.dataset = dataset
+        self.generator = generator
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __iter__(self):
+        size = len(self.dataset)
+        if size <= 0:
+            return
+        # The legacy loader consumes one base seed before RandomSampler. Its
+        # no-replacement implementation then evaluates a second empty slice.
+        torch.empty((), dtype=torch.int64).random_(generator=self.generator)
+        yield from torch.randperm(size, generator=self.generator).tolist()
+        torch.randperm(size, generator=self.generator)
+
+
+def _limited_dataset(
+    dataset: Dataset,
+    value: Any,
+    *,
+    option_name: str,
+) -> Dataset:
+    if value is None:
+        return dataset
+    limit = int(value)
+    if limit <= 0:
+        raise ValueError(f"{option_name} must be greater than 0")
+    return Subset(dataset, range(min(limit, len(dataset))))
+
+
+def compute_class_weighting(
+    records: Iterable[dict[str, Any]],
+    class_names: Iterable[str],
+    options: str | dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compute reproducible train-split class weights without sampling labels."""
+
+    names = list(class_names)
+    if not names:
+        raise ValueError("class_names must not be empty")
+    class_to_id = {name: index for index, name in enumerate(names)}
+    counts = np.zeros(len(names), dtype=np.int64)
+    for record in records:
+        label = record.get("label")
+        if label is not None and str(label) in class_to_id:
+            label_id = class_to_id[str(label)]
+        else:
+            try:
+                label_id = int(record["label_id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    "class weighting records require a valid label or label_id"
+                ) from exc
+        if not 0 <= label_id < len(names):
+            raise ValueError(f"class weighting label_id out of range: {label_id}")
+        counts[label_id] += 1
+    if bool((counts == 0).any()):
+        missing = [names[index] for index in np.flatnonzero(counts == 0)]
+        raise ValueError(f"class weighting found empty train classes: {missing}")
+
+    if options is None:
+        settings: dict[str, Any] = {"method": "none"}
+    elif isinstance(options, str):
+        settings = {"method": options}
+    elif isinstance(options, dict):
+        settings = dict(options)
+    else:
+        raise ValueError("loss.class_weighting must be a string or object")
+    method = str(settings.get("method", "none")).strip().lower()
+    valid_methods = {"none", "inverse_frequency", "sqrt_inverse", "effective_number"}
+    if method not in valid_methods:
+        raise ValueError(
+            f"class weighting method must be one of {sorted(valid_methods)}"
+        )
+
+    weights: np.ndarray | None = None
+    if method != "none":
+        frequencies = counts.astype(np.float64)
+        if method == "inverse_frequency":
+            weights = 1.0 / frequencies
+        elif method == "sqrt_inverse":
+            weights = 1.0 / np.sqrt(frequencies)
+        else:
+            beta = float(settings.get("beta", 0.999))
+            if not 0.0 <= beta < 1.0:
+                raise ValueError("effective-number beta must be in [0,1)")
+            weights = (1.0 - beta) / (1.0 - np.power(beta, frequencies))
+        weights /= weights.mean()
+        max_weight = settings.get("max_weight")
+        if max_weight is not None:
+            max_weight = float(max_weight)
+            if not math.isfinite(max_weight) or max_weight <= 0.0:
+                raise ValueError("class weighting max_weight must be finite and > 0")
+            weights = np.minimum(weights, max_weight)
+        if not bool(np.isfinite(weights).all()) or bool((weights <= 0.0).any()):
+            raise ValueError("computed class weights must be finite and positive")
+
+    return {
+        "method": method,
+        "apply_to_ce": bool(settings.get("apply_to_ce", True)),
+        "apply_to_focal": bool(settings.get("apply_to_focal", False)),
+        "counts": {name: int(count) for name, count in zip(names, counts)},
+        "weights": None if weights is None else weights.tolist(),
+    }
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _atomic_torch_save(path: Path, payload: Any) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, temporary)
+    temporary.replace(path)
+
+
+def _training_config_fingerprint(config: dict[str, Any]) -> str:
+    """Hash training-critical configuration while ignoring resume controls."""
+
+    payload = {
+        key: value
+        for key, value in config.items()
+        if not key.startswith("_")
+    }
+    payload = json.loads(json.dumps(payload, ensure_ascii=False))
+    training = payload.get("training")
+    if isinstance(training, dict):
+        training.pop("resume", None)
+        training.pop("resume_checkpoint", None)
+        # Checkpoint cadence is operational and does not alter optimization.
+        training.pop("checkpoint_every_epochs", None)
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _resume_path(
+    training: dict[str, Any], checkpoint_dir: Path
+) -> Path | None:
+    explicit = training.get("resume_checkpoint")
+    if explicit:
+        return resolve_project_path(explicit)
+    resume = training.get("resume", False)
+    if isinstance(resume, str) and resume.strip():
+        return resolve_project_path(resume)
+    return checkpoint_dir / "last.pt" if bool(resume) else None
+
+
+_VISUAL_ANCHOR_STATE_MAPPINGS = (
+    ("visual_encoder.", "visual_encoder."),
+    ("scale_projections.", "visual_anchor_scale_projections."),
+    ("scale_prior_logits", "visual_anchor_scale_prior_logits"),
+    ("visual_adapter.", "visual_anchor_adapter."),
+    ("dynamic_scale_gate.", "visual_anchor_dynamic_scale_gate."),
+    ("output_norm.", "visual_anchor_output_norm."),
+    ("classifier.", "visual_anchor_classifier."),
+)
+
+
+def _validate_initialization_checkpoint(
+    checkpoint: dict[str, Any],
+    *,
+    class_names: list[str],
+    path: Path,
+) -> dict[str, Tensor]:
+    if checkpoint.get("class_names") != class_names:
+        raise ValueError(
+            f"initialization checkpoint class_names do not match config: {path}"
+        )
+    state = checkpoint.get("model_state")
+    if not isinstance(state, dict) or not state:
+        raise ValueError(f"initialization checkpoint has no model_state: {path}")
+    return state
+
+
+def _initialize_model_from_checkpoint(
+    model: nn.Module,
+    checkpoint_path: str | Path,
+    *,
+    class_names: list[str],
+    visual_anchor_only: bool = False,
+) -> dict[str, Any]:
+    path = resolve_project_path(checkpoint_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"initialization checkpoint not found: {path}")
+    checkpoint = load_checkpoint(path, torch.device("cpu"))
+    source_state = _validate_initialization_checkpoint(
+        checkpoint,
+        class_names=class_names,
+        path=path,
+    )
+    target_state = model.state_dict()
+    compatible: dict[str, Tensor] = {}
+    shape_mismatches: list[str] = []
+
+    def shape_matches(target: Tensor, source: Tensor) -> bool:
+        try:
+            return target.shape == source.shape
+        except RuntimeError as exc:
+            if "uninitialized parameter or buffer" not in str(exc):
+                raise
+            return True
+
+    if visual_anchor_only:
+        if not bool(getattr(model, "visual_anchor_enabled", False)):
+            raise ValueError(
+                "visual_anchor_checkpoint requires model.visual_anchor_enabled"
+            )
+        for source_prefix, target_prefix in _VISUAL_ANCHOR_STATE_MAPPINGS:
+            for source_key, value in source_state.items():
+                if source_key == source_prefix:
+                    suffix = ""
+                elif source_key.startswith(source_prefix):
+                    suffix = source_key[len(source_prefix) :]
+                else:
+                    continue
+                target_key = target_prefix + suffix
+                if target_key not in target_state:
+                    continue
+                if not shape_matches(target_state[target_key], value):
+                    shape_mismatches.append(target_key)
+                    continue
+                compatible[target_key] = value
+        required = {
+            key
+            for key in target_state
+            if key.startswith("visual_encoder.")
+            or key.startswith("visual_anchor_")
+            and not key.startswith("visual_anchor_gate.")
+        }
+        missing = sorted(required - set(compatible))
+        if missing:
+            raise RuntimeError(
+                "visual anchor initialization is incomplete: "
+                f"missing={missing[:8]} total={len(missing)}"
+            )
+    else:
+        for key, value in source_state.items():
+            if key not in target_state:
+                continue
+            if not shape_matches(target_state[key], value):
+                shape_mismatches.append(key)
+                continue
+            compatible[key] = value
+        if not compatible:
+            raise RuntimeError("initialization checkpoint has no compatible keys")
+    if shape_mismatches:
+        raise RuntimeError(
+            "initialization checkpoint has shape mismatches: "
+            f"{shape_mismatches[:8]}"
+        )
+    model.load_state_dict(compatible, strict=False)
+    return {
+        "path": str(path),
+        "epoch": int(checkpoint.get("epoch", 0)),
+        "mode": "visual_anchor" if visual_anchor_only else "compatible",
+        "loaded_key_count": len(compatible),
+    }
+
+
+def _initialize_semantic_memory_from_training_sensors(
+    model: nn.Module,
+    dataset: ManifestDataset,
+    *,
+    class_names: list[str],
+    device: torch.device,
+    batch_size: int = 512,
+    trainable: bool = False,
+) -> dict[str, Any]:
+    """Initialize class-bound fallback values from train-split sensors only."""
+
+    sensor_encoder = getattr(model, "sensor_encoder", None)
+    initializer = getattr(model, "initialize_fallback_sensor_value_bank", None)
+    if sensor_encoder is None or not callable(initializer):
+        raise ValueError("model does not support semantic sensor memory")
+    if batch_size <= 0:
+        raise ValueError("semantic memory initialization batch size must be positive")
+
+    class_to_id = {name: index for index, name in enumerate(class_names)}
+    sums = torch.zeros(
+        len(class_names),
+        int(getattr(model, "feature_dim", 512)),
+        device=device,
+    )
+    counts = torch.zeros(len(class_names), device=device)
+    grids: list[Tensor] = []
+    labels: list[int] = []
+
+    def flush() -> None:
+        if not grids:
+            return
+        grid_batch = torch.stack(grids).to(device)
+        label_batch = torch.tensor(labels, device=device, dtype=torch.long)
+        with torch.inference_mode():
+            encoded = sensor_encoder(grid_batch)
+        sums.index_add_(0, label_batch, encoded)
+        counts.index_add_(
+            0,
+            label_batch,
+            torch.ones_like(label_batch, dtype=counts.dtype),
+        )
+        grids.clear()
+        labels.clear()
+
+    sensor_encoder.eval()
+    for record in dataset.records:
+        label = record.get("label")
+        if label is not None and str(label) in class_to_id:
+            label_id = class_to_id[str(label)]
+        else:
+            label_id = int(record["label_id"])
+        if not 0 <= label_id < len(class_names):
+            raise ValueError(f"semantic memory label_id out of range: {label_id}")
+        grids.append(
+            load_sensor_grid(
+                record,
+                manifest_dir=dataset.manifest_dir,
+                sidecar=dataset.sensor_sidecar,
+            )
+        )
+        labels.append(label_id)
+        if len(grids) >= batch_size:
+            flush()
+    flush()
+    if bool((counts == 0).any()):
+        missing = [
+            class_names[index]
+            for index in torch.nonzero(counts == 0, as_tuple=False)
+            .flatten()
+            .tolist()
+        ]
+        raise ValueError(f"semantic memory has empty classes: {missing}")
+    centers = sums / counts.unsqueeze(1)
+    initializer(centers, trainable=trainable)
+    return {
+        "mode": "train_sensor_class_centers",
+        "sample_count": int(counts.sum().item()),
+        "class_counts": {
+            name: int(count)
+            for name, count in zip(class_names, counts.detach().cpu().tolist())
+        },
+        "trainable": bool(trainable),
+    }
+
+
+def _restore_training_checkpoint(
+    checkpoint_path: Path,
+    *,
+    config: dict[str, Any],
+    class_names: list[str],
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: LambdaLR,
+    data_loader_generator: torch.Generator,
+    device: torch.device,
+) -> tuple[int, float, list[dict[str, float | int]]]:
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"resume checkpoint not found: {checkpoint_path}"
+        )
+    checkpoint = load_checkpoint(checkpoint_path, device)
+    expected_fingerprint = _training_config_fingerprint(config)
+    actual_fingerprint = checkpoint.get("config_fingerprint")
+    if actual_fingerprint != expected_fingerprint:
+        raise ValueError(
+            "resume checkpoint configuration fingerprint mismatch: "
+            f"expected={expected_fingerprint}, actual={actual_fingerprint}"
+        )
+    if checkpoint.get("class_names") != class_names:
+        raise ValueError("resume checkpoint class_names do not match config")
+    for required in (
+        "optimizer_state",
+        "scheduler_state",
+        "history",
+        "best_val_accuracy",
+        "data_loader_generator_state",
+        "torch_rng_state",
+    ):
+        if required not in checkpoint:
+            raise ValueError(
+                f"resume checkpoint is missing required field: {required}"
+            )
+
+    model.load_state_dict(checkpoint["model_state"], strict=True)
+    optimizer.load_state_dict(checkpoint["optimizer_state"])
+    scheduler.load_state_dict(checkpoint["scheduler_state"])
+    start_epoch = int(checkpoint.get("epoch", 0))
+    history = checkpoint["history"]
+    if not isinstance(history, list) or len(history) != start_epoch:
+        raise ValueError(
+            "resume checkpoint history length must equal completed epoch count"
+        )
+    data_loader_generator.set_state(
+        checkpoint["data_loader_generator_state"].cpu()
+    )
+    torch.set_rng_state(checkpoint["torch_rng_state"].cpu())
+    cuda_states = checkpoint.get("cuda_rng_state_all")
+    if torch.cuda.is_available() and cuda_states:
+        torch.cuda.set_rng_state_all([state.cpu() for state in cuda_states])
+    return start_epoch, float(checkpoint["best_val_accuracy"]), history
 
 
 def make_scheduler(
@@ -446,9 +873,38 @@ def degrade_sensor_grid(
         torch.rand(sample_shape, **rand_kwargs)
         < _probability(options, "noise_probability", "noise_prob")
     ) & active
-    noise_std = max(float(options.get("noise_std", options.get("noise_strength", 0.0))), 0.0)
-    if noise_std > 0.0 and bool(noise_mask.any()):
-        noise = torch.randn(clean.shape, **rand_kwargs) * noise_std
+    noise_std_range = options.get("noise_std_range")
+    if (
+        isinstance(noise_std_range, (list, tuple))
+        and len(noise_std_range) == 2
+    ):
+        noise_std_low = max(float(noise_std_range[0]), 0.0)
+        noise_std_high = max(float(noise_std_range[1]), 0.0)
+        if noise_std_low > noise_std_high:
+            raise ValueError("noise_std_range must be ordered [low, high]")
+        sample_noise_std = (
+            torch.rand(sample_shape, **rand_kwargs)
+            * (noise_std_high - noise_std_low)
+            + noise_std_low
+        )
+    else:
+        noise_std = max(
+            float(
+                options.get(
+                    "noise_std",
+                    options.get("noise_strength", 0.0),
+                )
+            ),
+            0.0,
+        )
+        sample_noise_std = torch.full(
+            sample_shape,
+            noise_std,
+            device=clean.device,
+            dtype=clean.dtype,
+        )
+    if bool((sample_noise_std > 0.0).any()) and bool(noise_mask.any()):
+        noise = torch.randn(clean.shape, **rand_kwargs) * sample_noise_std
         degraded = torch.where(noise_mask, degraded + noise, degraded)
 
     bias_mask = (
@@ -531,6 +987,7 @@ def _run_epoch(
     total_loss = 0.0
     correct = 0
     count = 0
+    confusion: np.ndarray | None = None
     component_totals: dict[str, float] = {}
     context = torch.enable_grad if training else torch.no_grad
     with context():
@@ -542,7 +999,14 @@ def _run_epoch(
                 optimizer.zero_grad(set_to_none=True)
 
             sensor_encoder = getattr(model, "sensor_encoder", None)
-            if sensor_encoder is not None:
+            sensor_path_enabled = bool(
+                getattr(
+                    model,
+                    "sensor_modality_enabled",
+                    sensor_encoder is not None,
+                )
+            )
+            if sensor_encoder is not None and sensor_path_enabled:
                 with torch.no_grad():
                     clean_sensor_target = sensor_encoder(sensors).detach()
                 degradation = (
@@ -561,6 +1025,7 @@ def _run_epoch(
                     labels,
                     aux=aux,
                     sensor_target=clean_sensor_target,
+                    sensor_grid_target=sensors,
                     quality_target=degradation["quality_target"],
                     reconstruction_mask=torch.ones_like(degradation["availability"]),
                     return_components=True,
@@ -573,17 +1038,55 @@ def _run_epoch(
                 loss.backward()
                 optimizer.step()
             batch_size = labels.numel()
+            predictions = logits.argmax(dim=-1)
             total_loss += float(loss.detach()) * batch_size
-            correct += int((logits.argmax(dim=-1) == labels).sum())
+            correct += int((predictions == labels).sum())
             count += batch_size
+            if return_metrics:
+                num_classes = int(logits.shape[-1])
+                if confusion is None:
+                    confusion = np.zeros(
+                        (num_classes, num_classes),
+                        dtype=np.int64,
+                    )
+                elif confusion.shape != (num_classes, num_classes):
+                    raise RuntimeError("number of classes changed within an epoch")
+                encoded = labels * num_classes + predictions
+                confusion += (
+                    torch.bincount(
+                        encoded,
+                        minlength=num_classes * num_classes,
+                    )
+                    .reshape(num_classes, num_classes)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
             for name, value in components.items():
                 component_totals[name] = component_totals.get(name, 0.0) + (
                     float(value.detach()) * batch_size
                 )
-            if sensor_encoder is not None:
+            if sensor_encoder is not None and sensor_path_enabled:
                 for name in ("sensor_reliability", "sensor_consistency"):
                     component_totals[name] = component_totals.get(name, 0.0) + (
                         float(aux[name].detach().mean()) * batch_size
+                    )
+                if bool(getattr(model, "visual_anchor_enabled", False)):
+                    for name in (
+                        "visual_anchor_gate",
+                        "visual_anchor_confidence",
+                        "visual_anchor_disagreement",
+                    ):
+                        component_totals[name] = component_totals.get(
+                            name, 0.0
+                        ) + float(aux[name].detach().mean()) * batch_size
+                    anchor_accuracy = (
+                        aux["visual_anchor_logits"].detach().argmax(dim=-1)
+                        == labels
+                    ).float().mean()
+                    component_totals["visual_anchor_accuracy"] = (
+                        component_totals.get("visual_anchor_accuracy", 0.0)
+                        + float(anchor_accuracy) * batch_size
                     )
 
     average_loss = total_loss / max(count, 1)
@@ -591,6 +1094,32 @@ def _run_epoch(
     if not return_metrics:
         return average_loss, accuracy
     metrics = {name: value / max(count, 1) for name, value in component_totals.items()}
+    if confusion is None:
+        metrics["macro_f1"] = 0.0
+    else:
+        true_positive = np.diag(confusion).astype(np.float64)
+        predicted_total = confusion.sum(axis=0, dtype=np.float64)
+        actual_total = confusion.sum(axis=1, dtype=np.float64)
+        precision = np.divide(
+            true_positive,
+            predicted_total,
+            out=np.zeros_like(true_positive),
+            where=predicted_total > 0,
+        )
+        recall = np.divide(
+            true_positive,
+            actual_total,
+            out=np.zeros_like(true_positive),
+            where=actual_total > 0,
+        )
+        metrics["macro_f1"] = float(
+            np.divide(
+                2.0 * precision * recall,
+                precision + recall,
+                out=np.zeros_like(precision),
+                where=(precision + recall) > 0,
+            ).mean()
+        )
     return average_loss, accuracy, metrics
 
 
@@ -605,46 +1134,212 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("配置中的 classes 不能为空")
 
     seed = int(training.get("seed", 42))
+    selection_metric = str(
+        training.get("selection_metric", "accuracy")
+    ).strip().lower()
+    supported_selection_metrics = {
+        "accuracy",
+        "macro_f1",
+        "sensor_grid_reconstruction",
+        "sensor_reconstruction",
+        "semantic_alignment",
+    }
+    if selection_metric not in supported_selection_metrics:
+        raise ValueError(
+            "training.selection_metric must be one of "
+            f"{sorted(supported_selection_metrics)}"
+        )
+    default_selection_mode = (
+        "max" if selection_metric in {"accuracy", "macro_f1"} else "min"
+    )
+    selection_mode = str(
+        training.get("selection_mode", default_selection_mode)
+    ).strip().lower()
+    if selection_mode not in {"max", "min"}:
+        raise ValueError("training.selection_mode must be max or min")
     set_seed(seed)
     device_name = training.get("device", "cuda" if torch.cuda.is_available() else "cpu")
     device = torch.device(device_name)
     image_size = int(data.get("image_size", 640))
     preprocess = config.get("preprocess", {})
     sensor_manifest = data.get("sensor_manifest")
-    train_dataset = ManifestDataset(
+    enabled_modalities = set(
+        config.get("model", {}).get(
+            "enabled_modalities", ("visual", "text", "sensor")
+        )
+    )
+    load_images = "visual" in enabled_modalities
+    full_train_dataset = ManifestDataset(
         data.get("train_manifest", "data/generated/train.jsonl"),
         class_names=class_names,
         image_size=image_size,
         sensor_manifest=sensor_manifest,
         preprocess=preprocess,
+        load_images=load_images,
     )
-    val_dataset = ManifestDataset(
+    full_val_dataset = ManifestDataset(
         data.get("val_manifest", "data/generated/val.jsonl"),
         class_names=class_names,
         image_size=image_size,
         sensor_manifest=sensor_manifest,
         preprocess=preprocess,
+        load_images=load_images,
     )
+    train_dataset = _limited_dataset(
+        full_train_dataset,
+        training.get("max_train_samples"),
+        option_name="training.max_train_samples",
+    )
+    val_dataset = _limited_dataset(
+        full_val_dataset,
+        training.get("max_val_samples"),
+        option_name="training.max_val_samples",
+    )
+    num_workers = int(training.get("num_workers", 0))
     loader_options = {
         "batch_size": int(training.get("batch_size", 16)),
-        "num_workers": int(training.get("num_workers", 0)),
+        "num_workers": num_workers,
         "pin_memory": device.type == "cuda",
     }
+    if num_workers > 0:
+        loader_options.update(
+            {
+                "persistent_workers": True,
+                "prefetch_factor": int(training.get("prefetch_factor", 2)),
+            }
+        )
     generator = torch.Generator().manual_seed(seed)
-    train_loader = DataLoader(
-        train_dataset, shuffle=True, generator=generator, **loader_options
+    preserve_single_worker_order = bool(
+        training.get("preserve_single_worker_order", False)
     )
+    if num_workers > 0 and preserve_single_worker_order:
+        sampler = _SingleWorkerOrderRandomSampler(train_dataset, generator)
+        worker_generator = torch.Generator().manual_seed(seed + 1_000_003)
+        train_loader = DataLoader(
+            train_dataset,
+            sampler=sampler,
+            generator=worker_generator,
+            **loader_options,
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset, shuffle=True, generator=generator, **loader_options
+        )
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_options)
 
     model = build_production_model(config).to(device)
+    initialization: list[dict[str, Any]] = []
+    initialization_checkpoint = training.get("initialization_checkpoint")
+    visual_anchor_checkpoint = training.get("visual_anchor_checkpoint")
+    if (
+        (initialization_checkpoint or visual_anchor_checkpoint)
+        and (training.get("resume") or training.get("resume_checkpoint"))
+    ):
+        raise ValueError("initialization checkpoints cannot be combined with resume")
+    if initialization_checkpoint:
+        initialization.append(
+            _initialize_model_from_checkpoint(
+                model,
+                initialization_checkpoint,
+                class_names=class_names,
+            )
+        )
+    if visual_anchor_checkpoint:
+        initialization.append(
+            _initialize_model_from_checkpoint(
+                model,
+                visual_anchor_checkpoint,
+                class_names=class_names,
+                visual_anchor_only=True,
+            )
+        )
+    if bool(training.get("freeze_visual_anchor", False)):
+        freeze_visual_anchor = getattr(model, "freeze_visual_anchor", None)
+        if not callable(freeze_visual_anchor):
+            raise ValueError("model does not support a frozen visual anchor")
+        freeze_visual_anchor()
+    frozen_modules = training.get("freeze_modules", ())
+    if frozen_modules:
+        if isinstance(frozen_modules, (str, bytes)):
+            raise ValueError("training.freeze_modules must be a list of names")
+        freeze_modules = getattr(model, "freeze_modules", None)
+        if not callable(freeze_modules):
+            raise ValueError("model does not support explicit module freezing")
+        freeze_modules(tuple(str(name) for name in frozen_modules))
+    if bool(training.get("initialize_fallback_sensor_value_bank", False)):
+        initialization.append(
+            _initialize_semantic_memory_from_training_sensors(
+                model,
+                full_train_dataset,
+                class_names=class_names,
+                device=device,
+                batch_size=int(
+                    training.get(
+                        "semantic_memory_initialization_batch_size",
+                        512,
+                    )
+                ),
+                trainable=bool(
+                    training.get("semantic_memory_trainable", False)
+                ),
+            )
+        )
     loss_config = config.get("loss", {})
+    class_weighting = compute_class_weighting(
+        full_train_dataset.records,
+        class_names,
+        loss_config.get("class_weighting"),
+    )
+    class_weights = class_weighting["weights"]
+    focal_alpha = loss_config.get("alpha", 0.25)
+    if class_weights is not None and class_weighting["apply_to_focal"]:
+        alpha_values = np.asarray(focal_alpha, dtype=np.float64)
+        if alpha_values.ndim == 0:
+            alpha_values = alpha_values * np.asarray(class_weights)
+        elif alpha_values.ndim == 1 and alpha_values.size == len(class_names):
+            alpha_values = alpha_values * np.asarray(class_weights)
+        else:
+            raise ValueError(
+                "loss.alpha must be scalar or match classes when focal "
+                "class weighting is enabled"
+            )
+        focal_alpha = alpha_values.tolist()
     criterion = JointClassificationLoss(
         ce_weight=float(loss_config.get("ce_weight", 1.0)),
         focal_weight=float(loss_config.get("focal_weight", 1.0)),
-        alpha=loss_config.get("alpha", 0.25),
+        alpha=focal_alpha,
         gamma=float(loss_config.get("gamma", 2.0)),
+        ce_class_weights=(
+            class_weights
+            if class_weights is not None and class_weighting["apply_to_ce"]
+            else None
+        ),
         reconstruction_weight=float(loss_config.get("reconstruction_weight", 0.0)),
         calibration_weight=float(loss_config.get("calibration_weight", 0.0)),
+        variance_prior_weight=float(
+            loss_config.get("variance_prior_weight", 0.0)
+        ),
+        variance_prior_target=float(
+            loss_config.get("variance_prior_target", -2.0)
+        ),
+        calibration_clean_weight=float(
+            loss_config.get("calibration_clean_weight", 1.0)
+        ),
+        sensor_grid_reconstruction_weight=float(
+            loss_config.get("sensor_grid_reconstruction_weight", 0.0)
+        ),
+        calibration_ranking_weight=float(
+            loss_config.get("calibration_ranking_weight", 0.0)
+        ),
+        calibration_ranking_margin=float(
+            loss_config.get("calibration_ranking_margin", 0.05)
+        ),
+        visual_anchor_safeguard_weight=float(
+            loss_config.get("visual_anchor_safeguard_weight", 0.0)
+        ),
+        semantic_alignment_weight=float(
+            loss_config.get("semantic_alignment_weight", 0.0)
+        ),
     ).to(device)
     optimizer = AdamW(
         (parameter for parameter in model.parameters() if parameter.requires_grad),
@@ -652,6 +1347,8 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
         weight_decay=float(training.get("weight_decay", 1e-5)),
     )
     epochs = int(training.get("epochs", 100))
+    if epochs <= 0:
+        raise ValueError("training.epochs must be greater than 0")
     scheduler = make_scheduler(
         optimizer, epochs=epochs, warmup_epochs=int(training.get("warmup_epochs", 5))
     )
@@ -661,9 +1358,91 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     best_accuracy = -1.0
+    best_selection_score = (
+        float("-inf") if selection_mode == "max" else float("inf")
+    )
+    best_checkpoint_epoch = 0
+    best_checkpoint_val_accuracy = -1.0
     history: list[dict[str, float | int]] = []
+    start_epoch = 0
+    resumed_from: str | None = None
     robustness_config = config.get("robustness", {})
-    for epoch in range(epochs):
+    save_checkpoints = bool(training.get("save_checkpoints", True))
+    checkpoint_every_epochs = int(
+        training.get("checkpoint_every_epochs", 1)
+    )
+    if checkpoint_every_epochs <= 0:
+        raise ValueError("training.checkpoint_every_epochs must be positive")
+    config_fingerprint = _training_config_fingerprint(config)
+    resume_checkpoint = _resume_path(training, checkpoint_dir)
+    if resume_checkpoint is not None:
+        start_epoch, best_accuracy, history = _restore_training_checkpoint(
+            resume_checkpoint,
+            config=config,
+            class_names=class_names,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            data_loader_generator=generator,
+            device=device,
+        )
+        resumed_from = str(resume_checkpoint.resolve())
+        selection_history_key = f"val_{selection_metric}"
+        selection_history = [
+            float(row[selection_history_key])
+            for row in history
+            if selection_history_key in row
+        ]
+        if history and not selection_history:
+            raise ValueError(
+                "resume history does not contain configured selection metric: "
+                f"{selection_history_key}"
+            )
+        best_selection_score = (
+            (max(selection_history) if selection_mode == "max" else min(selection_history))
+            if selection_history
+            else (
+                float("-inf")
+                if selection_mode == "max"
+                else float("inf")
+            )
+        )
+        if selection_history:
+            eligible_history = (
+                row
+                for row in history
+                if selection_history_key in row
+            )
+            best_history_row = (
+                max
+                if selection_mode == "max"
+                else min
+            )(
+                eligible_history,
+                key=lambda row: float(row[selection_history_key]),
+            )
+            best_checkpoint_epoch = int(best_history_row["epoch"])
+            best_checkpoint_val_accuracy = float(
+                best_history_row["val_accuracy"]
+            )
+        if start_epoch > epochs:
+            raise ValueError(
+                "resume checkpoint epoch exceeds configured training.epochs"
+            )
+        print(
+            json.dumps(
+                {
+                    "event": "resumed",
+                    "checkpoint": resumed_from,
+                    "completed_epochs": start_epoch,
+                    "target_epochs": epochs,
+                    "best_val_accuracy": best_accuracy,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    for epoch in range(start_epoch, epochs):
         train_loss, train_accuracy, train_components = _run_epoch(
             model,
             train_loader,
@@ -697,24 +1476,116 @@ def train_from_config(config: dict[str, Any]) -> dict[str, Any]:
             metrics[f"val_{name}"] = value
         history.append(metrics)
         print(json.dumps(metrics, ensure_ascii=False))
-        checkpoint = {
-            "epoch": epoch + 1,
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-            "val_accuracy": val_accuracy,
-            "class_names": class_names,
-            "config": {
-                key: value for key, value in config.items() if not key.startswith("_")
-            },
+        selection_score = (
+            val_accuracy
+            if selection_metric == "accuracy"
+            else float(val_components[selection_metric])
+        )
+        is_best = (
+            selection_score > best_selection_score
+            if selection_mode == "max"
+            else selection_score < best_selection_score
+        )
+        best_accuracy = max(best_accuracy, val_accuracy)
+        if is_best:
+            best_selection_score = selection_score
+            best_checkpoint_epoch = epoch + 1
+            best_checkpoint_val_accuracy = val_accuracy
+        history_payload = {
+            "experiment": config.get("experiment"),
+            "config_fingerprint": config_fingerprint,
+            "seed": seed,
+            "train_samples": len(train_dataset),
+            "validation_samples": len(val_dataset),
+            "full_train_samples": len(full_train_dataset),
+            "full_validation_samples": len(full_val_dataset),
+            "checkpoints_saved": save_checkpoints,
+            "class_weighting": class_weighting,
+            "initialization": initialization,
+            "resumed_from": resumed_from,
+            "best_val_accuracy": best_accuracy,
+            "selection_metric": selection_metric,
+            "selection_mode": selection_mode,
+            "best_selection_score": best_selection_score,
+            "best_checkpoint_epoch": best_checkpoint_epoch,
+            "best_checkpoint_val_accuracy": best_checkpoint_val_accuracy,
+            "history": history,
         }
-        torch.save(checkpoint, checkpoint_dir / "last.pt")
-        if val_accuracy > best_accuracy:
-            best_accuracy = val_accuracy
-            torch.save(checkpoint, checkpoint_dir / "best.pt")
+        _atomic_write_json(checkpoint_dir / "history.json", history_payload)
+        if save_checkpoints:
+            checkpoint_metadata = {
+                "epoch": epoch + 1,
+                "val_accuracy": val_accuracy,
+                "best_val_accuracy": best_accuracy,
+                "selection_metric": selection_metric,
+                "selection_mode": selection_mode,
+                "selection_score": selection_score,
+                "best_selection_score": best_selection_score,
+                "class_names": class_names,
+                "config_fingerprint": config_fingerprint,
+                "class_weighting": class_weighting,
+                "initialization": initialization,
+                "history": history,
+                "config": {
+                    key: value
+                    for key, value in config.items()
+                    if not key.startswith("_")
+                },
+            }
+            should_save_resume = (
+                (epoch + 1) % checkpoint_every_epochs == 0
+                or epoch + 1 == epochs
+            )
+            if should_save_resume:
+                last_checkpoint = {
+                    **checkpoint_metadata,
+                    "checkpoint_role": "last_resume",
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "scheduler_state": scheduler.state_dict(),
+                    "data_loader_generator_state": generator.get_state(),
+                    "torch_rng_state": torch.get_rng_state(),
+                    "cuda_rng_state_all": (
+                        torch.cuda.get_rng_state_all()
+                        if torch.cuda.is_available()
+                        else []
+                    ),
+                }
+                _atomic_torch_save(
+                    checkpoint_dir / "last.pt", last_checkpoint
+                )
+            if is_best:
+                best_checkpoint = {
+                    **checkpoint_metadata,
+                    "checkpoint_role": "best_evaluation",
+                    "model_state": model.state_dict(),
+                }
+                _atomic_torch_save(
+                    checkpoint_dir / "best.pt", best_checkpoint
+                )
 
-    return {
+    result = {
         "best_val_accuracy": best_accuracy,
+        "selection_metric": selection_metric,
+        "selection_mode": selection_mode,
+        "best_selection_score": best_selection_score,
+        "best_checkpoint_epoch": best_checkpoint_epoch,
+        "best_checkpoint_val_accuracy": best_checkpoint_val_accuracy,
         "epochs": epochs,
+        "start_epoch": start_epoch,
+        "completed_epochs": len(history),
+        "resumed_from": resumed_from,
+        "config_fingerprint": config_fingerprint,
         "checkpoint_dir": str(checkpoint_dir),
+        "train_samples": len(train_dataset),
+        "validation_samples": len(val_dataset),
+        "full_train_samples": len(full_train_dataset),
+        "full_validation_samples": len(full_val_dataset),
+        "checkpoints_saved": save_checkpoints,
+        "checkpoint_every_epochs": checkpoint_every_epochs,
+        "class_weighting": class_weighting,
+        "initialization": initialization,
         "history": history,
     }
+    _atomic_write_json(checkpoint_dir / "training_summary.json", result)
+    return result

@@ -40,6 +40,43 @@ from mmfc.sensors import (
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "default.json"
 
 
+def deduplicate_object_samples(
+    samples: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep one deterministic record for each identical labeled object crop."""
+
+    canonical_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    unique: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for sample in sorted(samples, key=lambda item: str(item["sample_id"])):
+        bbox = sample["bbox"]
+        key = (
+            str(sample["source_image_id"]),
+            str(sample["label"]),
+            *(round(float(value), 8) for value in bbox),
+        )
+        canonical = canonical_by_key.get(key)
+        if canonical is not None:
+            issues.append(
+                {
+                    "code": "duplicate_object_annotation",
+                    "sample_id": str(sample["sample_id"]),
+                    "annotation": sample.get("annotation_file"),
+                    "shape_index": sample.get("shape_index"),
+                    "canonical_sample_id": str(canonical["sample_id"]),
+                    "canonical_annotation": canonical.get("annotation_file"),
+                    "canonical_shape_index": canonical.get("shape_index"),
+                    "source_image_id": str(sample["source_image_id"]),
+                    "label": str(sample["label"]),
+                    "bbox": [float(value) for value in bbox],
+                }
+            )
+            continue
+        canonical_by_key[key] = sample
+        unique.append(sample)
+    return unique, issues
+
+
 def _bounded_int(
     option: str, *, minimum: int, maximum: int | None = None
 ) -> Any:
@@ -102,7 +139,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--workers",
         type=_bounded_int("--workers", minimum=1, maximum=32),
-        default=8,
+        default=4,
         help="Sensor generation concurrency, 1..32.",
     )
     parser.add_argument(
@@ -459,6 +496,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         getattr(args, "images", DEFAULT_IMAGES_DIR),
         project_root=PROJECT_ROOT,
     )
+    parsed_sample_count = len(samples)
+    samples, duplicate_issues = deduplicate_object_samples(samples)
+    report["parsed_samples"] = parsed_sample_count
+    report["samples"] = len(samples)
+    report["issues"].extend(duplicate_issues)
+    report["issue_counts"] = dict(
+        sorted(Counter(item["code"] for item in report["issues"]).items())
+    )
     unknown_labels = sorted(
         {sample["label"] for sample in samples} - set(label_to_index)
     )
@@ -482,6 +527,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     ordered_samples = sorted(all_samples, key=lambda item: item["sample_id"])
     summary = {
         "samples": len(all_samples),
+        "parsed_samples": parsed_sample_count,
+        "deduplicated_object_records": len(duplicate_issues),
         "source_images": len({item["source_image_id"] for item in all_samples}),
         "split_counts": {split: len(split_records[split]) for split in SPLITS},
         "class_counts": dict(
@@ -594,6 +641,17 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                     )
                     qwen_success += success_delta
                     fallback += fallback_delta
+                    if fallback_delta:
+                        source = sensor_record.get("source", {})
+                        status = str(source.get("enhancement_status", "fallback"))
+                        detail = str(source.get("error", status))
+                        sensor_issues.append(
+                            {
+                                "code": status,
+                                "sample_id": sample_id,
+                                "detail": detail,
+                            }
+                        )
                 completed += 1
                 new_completed += 1
                 if new_completed % checkpoint_every == 0:
@@ -702,6 +760,18 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     args = _parser().parse_args()
+    if (
+        args.sensor_mode == "qwen"
+        and not args.dry_run
+        and not qwen_api_key(args.api_key_env)
+    ):
+        print(
+            "构建失败：Qwen 模式未读取到 API Key。"
+            f"请在当前终端设置环境变量 {args.api_key_env}；"
+            "--api-key-env 参数应填写环境变量名，而不是密钥本身。",
+            file=sys.stderr,
+        )
+        return 2
     try:
         summary = build(args)
     except KeyboardInterrupt:

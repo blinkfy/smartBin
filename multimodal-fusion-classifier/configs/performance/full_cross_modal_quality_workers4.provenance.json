@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "state": "complete",
+  "valid": true,
+  "scope": "input_equivalent_training_runtime_configuration",
+  "base_experiment": "full_cross_modal_quality",
+  "fast_experiment": "full_cross_modal_quality_workers4",
+  "authorized_changes": {
+    "training.num_workers": {
+      "from": 0,
+      "to": 4
+    },
+    "training.checkpoint_dir": "checkpoints/performance/full_cross_modal_quality_workers4",
+    "experiment_metadata": true
+  },
+  "measured_input_speedup": 1.7619766935065846,
+  "equivalence": {
+    "sample_count": 7002,
+    "shuffle_epochs": 2,
+    "sample_order_identical": true,
+    "image_sensor_and_label_bytes_identical": true,
+    "persistent_workers": false
+  },
+  "source_bindings": {
+    "builder_source": {
+      "path": "prepare_equivalent_fast_config.py",
+      "size_bytes": 8603,
+      "sha256": "9ea59816db8165ed58352a7c1b98578e25bd2e5b070f9fb03298c23961b29fc2"
+    },
+    "base_config": {
+      "path": "configs/ablations/full_cross_modal_quality.json",
+      "size_bytes": 5664,
+      "sha256": "d144de264643087f0270f216a8341276859d787b74c2d41a644a477c26faa9c9"
+    },
+    "benchmark": {
+      "path": "reports/qwen-material/training/INPUT_PIPELINE_BENCHMARK.json",
+      "size_bytes": 4578,
+      "sha256": "332a4915b68735de454611979d393dc921ff61b03784888e697b87c6a26412fa"
+    },
+    "generated_config": {
+      "path": "configs/performance/full_cross_modal_quality_workers4.json",
+      "size_bytes": 5886,
+      "sha256": "b9083e25913827e1f610c570ff2d12a1ddb26bcc6952809fe2a0c598c70ce976"
+    }
+  },
+  "boundaries": [
+    "The measured speedup covers input preparation, not total model-training wall time.",
+    "The generated config is for future isolated runs and does not alter or replace completed seed-replication evidence.",
+    "Rebenchmark if storage, preprocessing, Dataset randomness, PyTorch, or hardware changes."
+  ],
+  "errors": []
+}

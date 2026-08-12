@@ -1,0 +1,259 @@
+{
+  "classes": [
+    {
+      "name": "potato",
+      "description": "完整的土豆或块状马铃薯，有浅褐色表皮，属于厨余有机物",
+      "semantic_name": "whole potato",
+      "semantic_description": "A dense moist organic tuber with high water content, a cool thermal response, low electrical conductivity, and a mild earthy odor."
+    },
+    {
+      "name": "rabbitcut",
+      "description": "切分后的兔肉或带骨肉块，呈红粉色并可能含脂肪组织",
+      "semantic_name": "cut rabbit meat",
+      "semantic_description": "A moist animal-tissue piece with high water content, soft texture, moderate conductivity, and a noticeable organic odor response."
+    },
+    {
+      "name": "battery1",
+      "description": "一号圆柱形干电池，体积较大，金属正负极明显",
+      "semantic_name": "large dry-cell battery",
+      "semantic_description": "A heavy rigid electrochemical cell with a metal casing, high thermal mass, conductive terminals, no moisture, and little odor."
+    },
+    {
+      "name": "battery5",
+      "description": "五号圆柱形干电池，细长金属外壳，属于有害垃圾",
+      "semantic_name": "AA dry-cell battery",
+      "semantic_description": "A compact dense electrochemical cell with a cylindrical metal shell, conductive terminals, no moisture, and little odor."
+    },
+    {
+      "name": "bottle",
+      "description": "普通透明或有色塑料饮料瓶，带瓶口和瓶身标签",
+      "semantic_name": "plastic beverage bottle",
+      "semantic_description": "A light hollow polymer container with low thermal mass, low conductivity, little retained moisture, and weak odor."
+    },
+    {
+      "name": "brick",
+      "description": "红色或灰色建筑砖块，表面粗糙且为规则长方体",
+      "semantic_name": "brick fragment",
+      "semantic_description": "A heavy porous mineral block with high thermal mass, low electrical conductivity, low moisture, and nearly no odor."
+    },
+    {
+      "name": "can",
+      "description": "圆柱形金属易拉罐，具有拉环顶盖和印刷包装",
+      "semantic_name": "aluminum beverage can",
+      "semantic_description": "A light hollow metal container with a conductive wall, rapid thermal response, little moisture, and weak residual odor."
+    },
+    {
+      "name": "china",
+      "description": "破损陶瓷或瓷片，坚硬光滑，断面锋利",
+      "semantic_name": "broken ceramic shard",
+      "semantic_description": "A rigid dense ceramic fragment with moderate thermal mass, very low conductivity, no moisture, and no odor."
+    },
+    {
+      "name": "stone",
+      "description": "天然石块或碎石，形状不规则，表面粗糙",
+      "semantic_name": "natural stone",
+      "semantic_description": "A dense irregular mineral object with high thermal mass, low conductivity, low moisture, and no odor."
+    },
+    {
+      "name": "drug",
+      "description": "药片泡罩板或散装药品，属于过期药物类有害垃圾",
+      "semantic_name": "loose medicine or blister pack",
+      "semantic_description": "A small medicinal item or blister unit with low mass, limited moisture, mixed polymer and foil conductivity, and a weak chemical odor."
+    },
+    {
+      "name": "drugbag",
+      "description": "软质药品包装袋，带药品文字或铝塑复合包装",
+      "semantic_name": "flexible medicine sachet",
+      "semantic_description": "A light thin pharmaceutical pouch with low thermal mass, low moisture, mixed film conductivity, and a weak chemical odor."
+    },
+    {
+      "name": "mooli",
+      "description": "完整白萝卜或萝卜段，白色肉质并可能带绿色叶柄",
+      "semantic_name": "whole white radish",
+      "semantic_description": "A heavy water-rich root vegetable with high moisture, a cool thermal response, moderate conductivity, and a fresh organic odor."
+    },
+    {
+      "name": "battery",
+      "description": "常见废旧电池，圆柱或方形，有金属电极，属于有害垃圾",
+      "semantic_name": "discarded household battery",
+      "semantic_description": "A dense rigid battery with metal electrodes, conductive surfaces, no moisture, high thermal mass, and little odor."
+    },
+    {
+      "name": "bottle2",
+      "description": "另一类塑料或玻璃瓶容器，具有清晰瓶颈与中空瓶身",
+      "semantic_name": "rigid bottle container",
+      "semantic_description": "A hollow bottle made of glass or rigid polymer with low moisture, low odor, and material-dependent thermal mass and conductivity."
+    },
+    {
+      "name": "drugbox",
+      "description": "硬纸质药品盒，表面印有药名、剂量或医药标识",
+      "semantic_name": "medicine carton",
+      "semantic_description": "A light dry paperboard package with low thermal mass, very low conductivity, little moisture, and a weak paper or medicine odor."
+    },
+    {
+      "name": "papercup",
+      "description": "一次性纸杯，圆台形薄壁容器，杯口呈圆环",
+      "semantic_name": "disposable paper cup",
+      "semantic_description": "A light paper-based cup with low conductivity and thermal mass, possibly slight retained moisture, and a weak beverage odor."
+    },
+    {
+      "name": "capsule",
+      "description": "药用胶囊或胶囊包装，呈小型双色椭圆柱形",
+      "semantic_name": "medicine capsule",
+      "semantic_description": "A very light dry pharmaceutical capsule with low thermal mass, low conductivity, little moisture, and a weak medicinal odor."
+    },
+    {
+      "name": "potatocut",
+      "description": "切开的土豆块，可见淡黄色内部和局部褐色表皮",
+      "semantic_name": "cut potato piece",
+      "semantic_description": "A moist cut tuber with exposed water-rich tissue, moderate conductivity, a cool thermal response, and a mild earthy odor."
+    },
+    {
+      "name": "paper",
+      "description": "废纸张、纸片或折叠纸制品，薄而平整",
+      "semantic_name": "waste paper sheet",
+      "semantic_description": "A light dry cellulose sheet with very low conductivity and thermal mass, little moisture, and a weak paper odor."
+    }
+  ],
+  "model": {
+    "yolo_weights": "../yolo11s-seg.pt",
+    "clip_model": "openai/clip-vit-base-patch16",
+    "clip_local_files_only": false,
+    "feature_dim": 512,
+    "attention_dim": 128,
+    "attention_heads": 8,
+    "dropout": 0.3,
+    "film_gamma_init": 1.0,
+    "film_beta_init": 0.1,
+    "scale_prior": [
+      0.3,
+      0.5,
+      0.2
+    ],
+    "text_temperature": 0.07,
+    "sensor_log_variance_min": -3.0,
+    "sensor_log_variance_max": 2.0,
+    "sensor_reliability_hidden_dim": 32,
+    "sensor_reliability_init": 0.85,
+    "enabled_modalities": [
+      "visual",
+      "text",
+      "sensor"
+    ],
+    "fusion_mode": "attention",
+    "film_enabled": true,
+    "sensor_reliability_enabled": true,
+    "sensor_grid_quality_enabled": true,
+    "sensor_grid_quality_hidden_dim": 16,
+    "sensor_cross_modal_quality_enabled": true,
+    "sensor_grid_decoder_hidden_dim": 64,
+    "sensor_cross_modal_quality_hidden_dim": 32,
+    "visual_anchor_enabled": true,
+    "visual_anchor_gate_hidden_dim": 32,
+    "visual_anchor_gate_init": 0.1,
+    "visual_anchor_gate_max": 1.0,
+    "freeze_yolo_layers": 5,
+    "freeze_clip_text_layers": 3,
+    "fallback_semantic_mode": "descriptions",
+    "fallback_semantic_shuffle_seed": 20260810,
+    "fallback_text_encoder_independent": true
+  },
+  "loss": {
+    "ce_weight": 1.0,
+    "focal_weight": 1.0,
+    "alpha": 0.25,
+    "gamma": 2.0,
+    "reconstruction_weight": 0.1,
+    "calibration_weight": 0.3,
+    "variance_prior_weight": 0.1,
+    "variance_prior_target": -2.0,
+    "calibration_clean_weight": 3.0,
+    "sensor_grid_reconstruction_weight": 0.5,
+    "calibration_ranking_weight": 0.05,
+    "calibration_ranking_margin": 0.05,
+    "visual_anchor_safeguard_weight": 0.5
+  },
+  "robustness": {
+    "sensor_degradation": {
+      "enabled": true,
+      "missing_probability": 0.1,
+      "noise_probability": 0.5,
+      "noise_std": 0.03,
+      "bias_probability": 0.25,
+      "bias_strength": 0.15,
+      "stuck_probability": 0.15,
+      "quality_scale": 0.25,
+      "noise_std_range": [
+        0.02,
+        0.15
+      ]
+    }
+  },
+  "data": {
+    "train_manifest": "data/qwen-material/train.jsonl",
+    "val_manifest": "data/qwen-material/val.jsonl",
+    "test_manifest": "data/qwen-material/test.jsonl",
+    "sensor_manifest": "data/qwen-material/sensors.jsonl",
+    "image_size": 480
+  },
+  "preprocess": {
+    "enabled": true,
+    "bilateral": {
+      "diameter": 3,
+      "sigma_space": 1.0,
+      "sigma_color": 0.8
+    },
+    "clahe": {
+      "enabled": true,
+      "brightness_threshold": 0.35,
+      "clip_limit": 2.0,
+      "tile_grid_size": [
+        8,
+        8
+      ]
+    },
+    "laplacian": {
+      "enabled": true,
+      "kernel_size": 3,
+      "strength": 1.0
+    },
+    "affine_matrix": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ]
+    ]
+  },
+  "training": {
+    "seed": 42,
+    "batch_size": 16,
+    "learning_rate": 5e-05,
+    "weight_decay": 1e-05,
+    "epochs": 8,
+    "warmup_epochs": 1,
+    "num_workers": 4,
+    "selection_metric": "macro_f1",
+    "initialization_checkpoint": "checkpoints\\visual-anchor\\pilot_seed42\\best.pt",
+    "visual_anchor_checkpoint": "checkpoints/ablations/vision_only/best.pt",
+    "freeze_visual_anchor": true,
+    "checkpoint_dir": "checkpoints/semantic-guidance-v2/seed42",
+    "freeze_modules": [
+      "text_encoder",
+      "fallback_text_encoder",
+      "sensor_encoder"
+    ]
+  },
+  "experiment": {
+    "name": "semantic_guidance_fallback_seed42",
+    "group": "semantic_guidance_fallback_v2",
+    "description": "An independent frozen semantic encoder supplies class-bound fallback prompts; classifier text inputs remain unchanged",
+    "formal_retraining_required": true,
+    "reference_checkpoint": "checkpoints\\visual-anchor\\pilot_seed42\\best.pt"
+  }
+}

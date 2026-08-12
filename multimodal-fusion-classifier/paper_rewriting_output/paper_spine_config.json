@@ -1,0 +1,33 @@
+{
+  "workflow": "build_from_materials",
+  "scene": "conference",
+  "tier": "pro",
+  "output_language": "en",
+  "target_name": "AANN 2026 pre-submission revision",
+  "materials_dir": "reports/qwen-material",
+  "draft_path": "paper_rewriting_output/aann2026_submission/paper.submission-revised.md",
+  "user_motivation": "Reliability-gated visual-sensor-state fusion with a learned fallback for missing and degraded structured sidecars.",
+  "official_urls": [],
+  "special_requirements": [
+    "All numerical claims must be traceable to local checkpoints, predictions, and scripts.",
+    "Current sidecar provenance must be disclosed as image-conditioned estimates rather than independent hardware measurements.",
+    "The repeatedly analyzed test split must be described as an internal benchmark rather than an untouched external blind test.",
+    "Visual-only must remain identified as the strongest clean classifier overall.",
+    "LMF may be called strongest in clean Macro F1 only among evaluated three-modality fusion methods.",
+    "The class-memory probe supports class alignment, not a unique natural-language semantic advantage.",
+    "Fixed-checkpoint bypasses measure path reliance, not independently retrained module contributions.",
+    "No absent sensor hardware or acquisition parameter may be invented."
+  ],
+  "word_output": "docx",
+  "translation_package": "none",
+  "reference_mode": "local_first",
+  "reference_paths": [
+    "2026.4.3-1基于多模态识别的医疗废品识别方法.docx",
+    "reports/qwen-material",
+    "mmfc",
+    "configs",
+    "README.md"
+  ],
+  "citation_target_count": 20,
+  "humanize_tier": "light"
+}

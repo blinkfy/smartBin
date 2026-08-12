@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "state": "complete",
+  "valid": true,
+  "source_pdf": "paper_rewriting_output/revision_snapshots/pre_ai_architecture_20260730/paper.pdf",
+  "source_pdf_sha256": "bab167da7d1eaddf68ad2fac4c9d6a11f34d568a197225d788dbd72737ba86e9",
+  "image": "reports/qwen-material/method_architecture_ai_handdrawn_word.png",
+  "image_sha256": "c02b3b1c0725545e042740b6b7c98c5b8cd608d0f5993e15e541b969a4fd9fc9",
+  "output_pdf": "paper_rewriting_output/final_paper/paper.pdf",
+  "output_pdf_sha256": "1b72592a34c7feec94f898697cede1aaedac373810ae3c9bac0751a7d59d851b",
+  "page_count": 13,
+  "updated_page_number": 3,
+  "target_rect_points": [
+    91.8499984741211,
+    214.33998107910156,
+    511.8500061035156,
+    417.03997802734375
+  ],
+  "text_or_pagination_changed": false,
+  "errors": []
+}

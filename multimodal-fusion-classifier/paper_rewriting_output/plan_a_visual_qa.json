@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "state": "complete",
+  "valid": true,
+  "visual_qa_complete": true,
+  "reviewer": "Codex page-by-page visual inspection",
+  "reviewed_at": "2026-07-30T19:24:49.883000+08:00",
+  "page_count": 13,
+  "issue_count": 0,
+  "paper_pdf_sha256": "bab167da7d1eaddf68ad2fac4c9d6a11f34d568a197225d788dbd72737ba86e9",
+  "source_bindings": {
+    "review_manifest": {
+      "path": "paper_rewriting_output/plan_a_visual_qa/REVIEW_MANIFEST.json",
+      "size_bytes": 5504,
+      "sha256": "113f4f2ef048b59687cffca00d4772cf57a934199e7be1e99c6cefdcfc755dfc"
+    },
+    "review_decision": {
+      "path": "paper_rewriting_output/plan_a_visual_qa/REVIEW_DECISION.json",
+      "size_bytes": 2721,
+      "sha256": "a184cc772f664d8b48090e4dbf80c72a76c53ec393b2d3a9271c2b8f3928743f"
+    },
+    "paper_pdf": {
+      "path": "paper_rewriting_output/final_paper/paper.pdf",
+      "size_bytes": 867396,
+      "sha256": "bab167da7d1eaddf68ad2fac4c9d6a11f34d568a197225d788dbd72737ba86e9"
+    },
+    "paper_docx": {
+      "path": "paper_rewriting_output/final_paper/paper.zh.docx",
+      "size_bytes": 1077078,
+      "sha256": "d695647a003ff94e5c4f53edf9ef2d69511e1fc340c5fab55d219be084c786d9"
+    },
+    "main_tex": {
+      "path": "paper_rewriting_output/final_paper/main.tex",
+      "size_bytes": 41575,
+      "sha256": "9c3f83d89c25e8c247d23a55165914a2d1ae9a341f95969a43b5208396c52de0"
+    },
+    "automated_build_audit": {
+      "path": "paper_rewriting_output/plan_a_automated_build_audit.json",
+      "size_bytes": 1729,
+      "sha256": "e9131e65f7ce46d599a2859b193dbec0a218fa7247c320315615063114f673a0"
+    },
+    "manuscript_refresh_status": {
+      "path": "reports/qwen-material/training/plan_a_manuscript_refresh_status.json",
+      "size_bytes": 1122,
+      "sha256": "61555d76f150f808769480126a982c6172150e24f261d42035ef6ef46cf09740"
+    },
+    "visual_qa_preparer": {
+      "path": "prepare_plan_a_visual_qa.py",
+      "size_bytes": 8003,
+      "sha256": "1ae272869239fd1dbc5d038e5818b4c2ca56dcd2321155c411b2794168642320"
+    },
+    "completer_source": {
+      "path": "complete_plan_a_visual_qa.py",
+      "size_bytes": 8632,
+      "sha256": "9d44a0e4acec20f72a3fad7c592e70640ebd1504ef8fb4b4d0dd8568642b37e6"
+    }
+  },
+  "claim_boundary": "This audit proves that every hash-bound rendered page was marked reviewed with no recorded layout issue. It does not create external, hardware, or complete-patent evidence.",
+  "errors": []
+}

@@ -1,0 +1,105 @@
+{
+  "experiment": "dynamic_gate_vs_constant_learned_gate",
+  "matched_difference": "The only model or optimization change is model.constant_sensor_reliability_gate=false to true. The constant gate reuses the dynamic head output bias, retains the same parameter inventory, and is multiplied by archived-record availability. Constant-gate runs use four persistent data-loader workers instead of zero solely for deterministic input prefetch. A separate worker RNG and legacy-order sampler preserve the single-worker shuffle sequence; audit_dataloader_worker_equivalence.py verifies identical sample order for each seed.",
+  "runs": [
+    {
+      "training_seed": 42,
+      "base_config": "E:\\program\\smtbin\\multimodal-fusion-classifier\\configs\\ablations\\full_cross_modal_quality.json",
+      "base_config_sha256": "d144de264643087f0270f216a8341276859d787b74c2d41a644a477c26faa9c9",
+      "constant_config": "E:\\program\\smtbin\\multimodal-fusion-classifier\\configs\\submission-revision\\constant-gate\\constant_gate_seed42.json",
+      "constant_config_sha256": "74e654f4b30fb5a2c5dfa0c29230cccba9ac2de5d2422c252e64f3c13dddc735",
+      "checkpoint_dir": "C:/mmfc-checkpoints/submission-revision/constant-gate-workers4/seed42",
+      "final_checkpoint_dir": "checkpoints/submission-revision/constant-gate-matched/seed42",
+      "operational_num_workers": 4,
+      "preserve_single_worker_order": true,
+      "config_differences": [
+        {
+          "path": "model.constant_sensor_reliability_gate",
+          "base": null,
+          "constant": true
+        },
+        {
+          "path": "training.checkpoint_dir",
+          "base": "checkpoints/ablations/full_cross_modal_quality",
+          "constant": "C:/mmfc-checkpoints/submission-revision/constant-gate-workers4/seed42"
+        },
+        {
+          "path": "training.num_workers",
+          "base": 0,
+          "constant": 4
+        },
+        {
+          "path": "training.preserve_single_worker_order",
+          "base": null,
+          "constant": true
+        }
+      ]
+    },
+    {
+      "training_seed": 43,
+      "base_config": "E:\\program\\smtbin\\multimodal-fusion-classifier\\configs\\replicates\\full_cross_modal_quality_seed43.json",
+      "base_config_sha256": "84e239196ff4fc3902ad9f0f5f723e65559ca2e61c0cae1a751b3a1b71b3c345",
+      "constant_config": "E:\\program\\smtbin\\multimodal-fusion-classifier\\configs\\submission-revision\\constant-gate\\constant_gate_seed43.json",
+      "constant_config_sha256": "0bcb503e47139fcaef374c15f357ac4dbcb0c5cdd3acdfa9fd066bb8cebd684b",
+      "checkpoint_dir": "C:/mmfc-checkpoints/submission-revision/constant-gate-workers4/seed43",
+      "final_checkpoint_dir": "checkpoints/submission-revision/constant-gate-matched/seed43",
+      "operational_num_workers": 4,
+      "preserve_single_worker_order": true,
+      "config_differences": [
+        {
+          "path": "model.constant_sensor_reliability_gate",
+          "base": null,
+          "constant": true
+        },
+        {
+          "path": "training.checkpoint_dir",
+          "base": "checkpoints/ablations/v3_seed_replicates/full_cross_modal_quality_seed43",
+          "constant": "C:/mmfc-checkpoints/submission-revision/constant-gate-workers4/seed43"
+        },
+        {
+          "path": "training.num_workers",
+          "base": 0,
+          "constant": 4
+        },
+        {
+          "path": "training.preserve_single_worker_order",
+          "base": null,
+          "constant": true
+        }
+      ]
+    },
+    {
+      "training_seed": 44,
+      "base_config": "E:\\program\\smtbin\\multimodal-fusion-classifier\\configs\\replicates\\full_cross_modal_quality_seed44.json",
+      "base_config_sha256": "797f8aa3ba91f8bf3c35b5efbeb812e8b96bbabb6d738f5df99d61f7db98f732",
+      "constant_config": "E:\\program\\smtbin\\multimodal-fusion-classifier\\configs\\submission-revision\\constant-gate\\constant_gate_seed44.json",
+      "constant_config_sha256": "1919aa35d65e6b45b01c2c695b11202f84141fa1af1b446ec5eaafa8592479a7",
+      "checkpoint_dir": "C:/mmfc-checkpoints/submission-revision/constant-gate-workers4/seed44",
+      "final_checkpoint_dir": "checkpoints/submission-revision/constant-gate-matched/seed44",
+      "operational_num_workers": 4,
+      "preserve_single_worker_order": true,
+      "config_differences": [
+        {
+          "path": "model.constant_sensor_reliability_gate",
+          "base": null,
+          "constant": true
+        },
+        {
+          "path": "training.checkpoint_dir",
+          "base": "checkpoints/ablations/v3_seed_replicates/full_cross_modal_quality_seed44",
+          "constant": "C:/mmfc-checkpoints/submission-revision/constant-gate-workers4/seed44"
+        },
+        {
+          "path": "training.num_workers",
+          "base": 0,
+          "constant": 4
+        },
+        {
+          "path": "training.preserve_single_worker_order",
+          "base": null,
+          "constant": true
+        }
+      ]
+    }
+  ]
+}

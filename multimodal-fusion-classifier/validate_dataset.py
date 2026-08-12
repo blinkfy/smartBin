@@ -52,6 +52,59 @@ def _validate_grid(
                 )
 
 
+def find_duplicate_object_records(
+    samples: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Find records that produce the same labeled crop from one source image."""
+
+    groups: dict[tuple[Any, ...], list[str]] = {}
+    for sample_id, sample in samples.items():
+        source_id = sample.get("source_image_id")
+        label = sample.get("label")
+        bbox = sample.get("bbox")
+        if (
+            not isinstance(source_id, str)
+            or not source_id
+            or not isinstance(label, str)
+            or not label
+            or not isinstance(bbox, list)
+            or len(bbox) != 4
+            or any(not _is_number(value) for value in bbox)
+        ):
+            continue
+        key = (
+            source_id,
+            label,
+            *(round(float(value), 8) for value in bbox),
+        )
+        groups.setdefault(key, []).append(str(sample_id))
+
+    result: list[dict[str, Any]] = []
+    for key, sample_ids in groups.items():
+        if len(sample_ids) < 2:
+            continue
+        sample_ids.sort()
+        result.append(
+            {
+                "source_image_id": key[0],
+                "label": key[1],
+                "bbox": list(key[2:]),
+                "canonical_sample_id": sample_ids[0],
+                "duplicate_sample_ids": sample_ids[1:],
+                "record_count": len(sample_ids),
+                "duplicate_record_count": len(sample_ids) - 1,
+            }
+        )
+    result.sort(
+        key=lambda group: (
+            group["source_image_id"],
+            group["label"],
+            group["canonical_sample_id"],
+        )
+    )
+    return result
+
+
 def validate_generated(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
     *,
@@ -239,6 +292,17 @@ def validate_generated(
     if orphan_sensors:
         errors.append(f"有 {len(orphan_sensors)} 条孤立传感器记录")
 
+    duplicate_object_groups = find_duplicate_object_records(samples)
+    for group in duplicate_object_groups:
+        warnings.append(
+            "完全重复对象："
+            f"source_image_id={group['source_image_id']}，"
+            f"label={group['label']}，"
+            f"canonical={group['canonical_sample_id']}，"
+            "duplicates="
+            + ",".join(group["duplicate_sample_ids"])
+        )
+
     index_path = output_dir / "index.json"
     if not index_path.is_file():
         errors.append("缺少文件：index.json")
@@ -304,6 +368,19 @@ def validate_generated(
         "sample_count": len(samples),
         "source_image_count": len(source_splits),
         "sensor_count": len(sensors),
+        "unique_object_count": (
+            len(samples)
+            - sum(
+                group["duplicate_record_count"]
+                for group in duplicate_object_groups
+            )
+        ),
+        "duplicate_object_group_count": len(duplicate_object_groups),
+        "duplicate_object_record_count": sum(
+            group["duplicate_record_count"]
+            for group in duplicate_object_groups
+        ),
+        "duplicate_object_groups": duplicate_object_groups,
         "split_counts": {split: split_counts[split] for split in SPLITS},
         "error_count": len(errors),
         "warning_count": len(warnings),

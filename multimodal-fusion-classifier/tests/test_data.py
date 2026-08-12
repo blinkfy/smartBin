@@ -11,6 +11,7 @@ from PIL import Image
 import build_dataset
 from build_dataset import _parser as build_parser
 from build_dataset import build
+from build_dataset import deduplicate_object_samples
 from mmfc.data import (
     parse_labelme_annotations,
     polygon_to_bbox,
@@ -18,7 +19,7 @@ from mmfc.data import (
     resolve_manifest_path,
     split_samples,
 )
-from validate_dataset import validate_generated
+from validate_dataset import find_duplicate_object_records, validate_generated
 
 
 def _write_fixture(
@@ -317,6 +318,33 @@ def test_polygon_bbox_is_clamped_and_rejects_invalid() -> None:
     assert polygon_to_bbox([[1, 1], [1, 2], [1, 3]], 10, 10) is None
 
 
+def test_validator_detects_duplicate_labeled_crops() -> None:
+    samples = {
+        "sample-b": {
+            "source_image_id": "source",
+            "label": "paper",
+            "bbox": [1.0, 2.0, 8.0, 9.0],
+        },
+        "sample-a": {
+            "source_image_id": "source",
+            "label": "paper",
+            "bbox": [1, 2, 8, 9],
+        },
+        "other": {
+            "source_image_id": "source",
+            "label": "paper",
+            "bbox": [2, 2, 8, 9],
+        },
+    }
+
+    groups = find_duplicate_object_records(samples)
+
+    assert len(groups) == 1
+    assert groups[0]["canonical_sample_id"] == "sample-a"
+    assert groups[0]["duplicate_sample_ids"] == ["sample-b"]
+    assert groups[0]["duplicate_record_count"] == 1
+
+
 def test_parse_labelme_reports_missing_and_invalid_shapes(tmp_path: Path) -> None:
     annotations = tmp_path / "Annotations"
     images = tmp_path / "images"
@@ -359,6 +387,31 @@ def test_parse_labelme_reports_missing_and_invalid_shapes(tmp_path: Path) -> Non
     assert report["issue_counts"]["invalid_polygon"] == 1
     assert report["issue_counts"]["unsupported_shape_type"] == 1
     assert report["issue_counts"]["missing_image"] == 1
+
+
+def test_build_deduplicates_identical_labeled_object_crops() -> None:
+    samples = [
+        {
+            "sample_id": sample_id,
+            "source_image_id": "source",
+            "label": "paper",
+            "bbox": [1.0, 2.0, 8.0, 9.0],
+            "annotation_file": annotation,
+            "shape_index": 0,
+        }
+        for sample_id, annotation in (
+            ("sample-b", "sample_copy.json"),
+            ("sample-a", "sample.json"),
+        )
+    ]
+
+    unique, issues = deduplicate_object_samples(samples)
+
+    assert [sample["sample_id"] for sample in unique] == ["sample-a"]
+    assert len(issues) == 1
+    assert issues[0]["canonical_sample_id"] == "sample-a"
+    assert issues[0]["sample_id"] == "sample-b"
+    assert issues[0]["code"] == "duplicate_object_annotation"
 
 
 def test_grouped_split_is_deterministic_and_has_no_leakage() -> None:
