@@ -216,7 +216,8 @@ class SDXSTextEmbeddingService:
         encoder = self.model_dir / "text_encoder" / "model.safetensors"
         missing = [str(path) for path in (vocab, merges, encoder) if not path.exists()]
         if missing:
-            raise FileNotFoundError("缺少SDXS文本编码资产，请先运行 scripts/convert_sdxs_to_onnx.py：" + ", ".join(missing))
+            script = "prepare_lcm_tiny_sd.py" if self.model_dir.name == "lcm-tiny-sd" else "convert_sdxs_to_onnx.py"
+            raise FileNotFoundError(f"缺少{self.model_dir.name}文本编码资产，请先运行 scripts/{script}：" + ", ".join(missing))
         if self.tokenizer is None:
             self.tokenizer = ClipTokenizer(vocab, merges)
         return encoder
@@ -249,6 +250,16 @@ class SDXSTextEmbeddingService:
 
 
 _SERVICE = SDXSTextEmbeddingService()
+_MODEL_SERVICES = {
+    "sdxs-512-dreamshaper": _SERVICE,
+    "lcm-tiny-sd": SDXSTextEmbeddingService(MODEL_DIR.parent / "lcm-tiny-sd"),
+}
+
+
+def get_text_to_image_prompt_embedding(prompt, model_id):
+    if model_id not in _MODEL_SERVICES:
+        raise ValueError("不支持的文生图模型")
+    return _MODEL_SERVICES[model_id].encode(prompt)
 
 
 def get_sdxs_prompt_embedding(prompt):

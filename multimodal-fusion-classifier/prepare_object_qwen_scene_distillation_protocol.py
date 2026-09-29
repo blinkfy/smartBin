@@ -127,7 +127,7 @@ def build_protocol(output: Path = DEFAULT_OUTPUT) -> dict[str, Any]:
             "teacher_source_image_counts": teacher["split_counts"],
             "teacher_object_counts": teacher["object_split_counts"],
             "teacher_qwen_success_count": teacher["generator_counts"][
-                "qwen3-vl-flash"
+                "qwen3.5-flash"
             ],
             "teacher_rule_fallback_count": teacher["generator_counts"][
                 "rule-v1"

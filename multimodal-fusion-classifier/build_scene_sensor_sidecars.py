@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
         "--base-url",
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
-    parser.add_argument("--model", default="qwen3-vl-flash")
+    parser.add_argument("--model", default="qwen3.5-flash")
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--workers", type=int, default=4)

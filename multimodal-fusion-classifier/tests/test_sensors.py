@@ -81,7 +81,7 @@ def test_qwen_uses_image_only_json_request_and_clamps_values() -> None:
         api_key="test-key", transport=transport, retries=0
     ).enhance(_image(), [2, 3, 27, 29], rule)
 
-    assert result["source"]["generator"] == "qwen3-vl-flash"
+    assert result["source"]["generator"] == "qwen3.5-flash"
     assert result["properties"]["weight_g"] == 5000.0
     assert result["properties"]["moisture_pct"] == 0.0
     assert result["normalized_grid"] == [[1.0] * 4] * 4
@@ -118,10 +118,10 @@ def test_qwen_without_key_never_calls_api_and_invalid_json_falls_back() -> None:
 def test_resume_is_mode_aware_and_retries_qwen_fallbacks() -> None:
     rule = simulate_rule_sensor(_image(), [2, 3, 27, 29], "sample")
     assert resume_record_usable(
-        rule, sensor_mode="rule", qwen_model="qwen3-vl-flash"
+        rule, sensor_mode="rule", qwen_model="qwen3.5-flash"
     )
     assert not resume_record_usable(
-        rule, sensor_mode="qwen", qwen_model="qwen3-vl-flash"
+        rule, sensor_mode="qwen", qwen_model="qwen3.5-flash"
     )
 
     qwen_success = {
@@ -136,7 +136,7 @@ def test_resume_is_mode_aware_and_retries_qwen_fallbacks() -> None:
         qwen_success, sensor_mode="qwen", qwen_model="custom-qwen-model"
     )
     assert not resume_record_usable(
-        qwen_success, sensor_mode="qwen", qwen_model="qwen3-vl-flash"
+        qwen_success, sensor_mode="qwen", qwen_model="qwen3.5-flash"
     )
 
     for status in ("fallback_no_api_key", "fallback_error"):
@@ -149,7 +149,7 @@ def test_resume_is_mode_aware_and_retries_qwen_fallbacks() -> None:
             },
         }
         assert not resume_record_usable(
-            fallback, sensor_mode="qwen", qwen_model="qwen3-vl-flash"
+            fallback, sensor_mode="qwen", qwen_model="qwen3.5-flash"
         )
 
 
@@ -157,7 +157,7 @@ def test_resume_rejects_malformed_sensor_records() -> None:
     rule = simulate_rule_sensor(_image(), [2, 3, 27, 29], "sample")
     malformed = {**rule, "normalized_grid": [[float("nan")] * 4] * 4}
     assert not resume_record_usable(
-        malformed, sensor_mode="rule", qwen_model="qwen3-vl-flash"
+        malformed, sensor_mode="rule", qwen_model="qwen3.5-flash"
     )
 
 
@@ -191,15 +191,15 @@ def test_resume_rejects_recursive_case_insensitive_leakage_in_all_modes(
         **rule,
         "source": {
             **rule["source"],
-            "generator": "qwen3-vl-flash",
+            "generator": "qwen3.5-flash",
             "enhancement_status": "success",
         },
     }
     assert resume_record_usable(
-        rule, sensor_mode="rule", qwen_model="qwen3-vl-flash"
+        rule, sensor_mode="rule", qwen_model="qwen3.5-flash"
     )
     assert resume_record_usable(
-        qwen, sensor_mode="qwen", qwen_model="qwen3-vl-flash"
+        qwen, sensor_mode="qwen", qwen_model="qwen3.5-flash"
     )
     assert not contains_leakage_key(rule)
     assert not contains_leakage_key(qwen)
@@ -209,10 +209,10 @@ def test_resume_rejects_recursive_case_insensitive_leakage_in_all_modes(
     leaked_qwen = {**qwen, "legacy": nested_leak}
     assert contains_leakage_key(leaked_rule)
     assert not resume_record_usable(
-        leaked_rule, sensor_mode="rule", qwen_model="qwen3-vl-flash"
+        leaked_rule, sensor_mode="rule", qwen_model="qwen3.5-flash"
     )
     assert not resume_record_usable(
-        leaked_qwen, sensor_mode="qwen", qwen_model="qwen3-vl-flash"
+        leaked_qwen, sensor_mode="qwen", qwen_model="qwen3.5-flash"
     )
 
 

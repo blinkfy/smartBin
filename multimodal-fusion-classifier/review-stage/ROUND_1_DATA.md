@@ -13,7 +13,7 @@
   - 从内存 crop 的亮度、饱和度、纹理、4x4 灰度结构和 bbox 几何生成确定性传感器数据。
   - 保存 4x4 原始/归一化阵列、重量、温度、湿度、气味指数、电导率及生成来源元数据。
   - 模拟器 API 不接收标签；传感器记录不保存 label/class/target。
-  - 可选 Qwen3-VL-Flash 使用 OpenAI-compatible `chat/completions`、Base64 data URL 和
+  - 可选 qwen3.5-flash 使用 OpenAI-compatible `chat/completions`、Base64 data URL 和
     `response_format={"type":"json_object"}`；提示只要求基于图像估计物理量，禁止类别识别。
   - 支持 DashScope Key 环境变量、base URL/model、超时、重试、响应校验/钳位、逐样本规则回退。
   - 缺少 Key 时不调用传输层；构建 CLI 支持 `--resume`、`--dry-run` 和 `--limit`。

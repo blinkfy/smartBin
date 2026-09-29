@@ -1,6 +1,14 @@
 import { Txt2ImgWorkerClient } from '/txt2img-vendor/web-txt2img/dist/index.js';
 
-const MODEL_ID = 'sdxs-512-dreamshaper';
+// 可选：'lcm-tiny-sd'（少步）或 'sdxs-512-dreamshaper'（单步）；切换后刷新页面。
+export const TEXT_TO_IMAGE_MODEL_ID = 'sdxs-512-dreamshaper';
+export const LCM_INFERENCE_STEPS = 4;
+const MODEL_ID = TEXT_TO_IMAGE_MODEL_ID;
+const MODEL_NAMES = { 'lcm-tiny-sd': 'LCM-Tiny-SD', 'sdxs-512-dreamshaper': 'SDXS' };
+if (!MODEL_NAMES[MODEL_ID]) throw new Error(`未知文生图模型：${MODEL_ID}`);
+export const TEXT_TO_IMAGE_MODEL_LABEL = MODEL_NAMES[MODEL_ID];
+export const TEXT_TO_IMAGE_MODEL_DESCRIPTION = MODEL_ID === 'lcm-tiny-sd'
+  ? `LCM-Tiny-SD ${LCM_INFERENCE_STEPS}步模型` : 'SDXS单步模型';
 const WEBGPU_UNSUPPORTED_MESSAGE = '当前浏览器或设备不支持WebGPU，请使用最新版Chrome或Edge并开启硬件加速';
 const EMBEDDING_LENGTH = 77 * 768;
 
@@ -100,11 +108,11 @@ export async function loadTextToImageModel(onProgress) {
       .load(
         MODEL_ID,
         { backendPreference: ['webgpu'] },
-        progress => reportProgress(onProgress, '正在下载SDXS单步模型...', progress)
+        progress => reportProgress(onProgress, `正在加载${TEXT_TO_IMAGE_MODEL_DESCRIPTION}...`, progress)
       )
       .then(result => {
         if (!result || result.ok === false) {
-          throw new Error(result?.message || 'SDXS模型加载失败');
+          throw new Error(result?.message || `${TEXT_TO_IMAGE_MODEL_LABEL}模型加载失败`);
         }
         modelLoaded = true;
         reportProgress(onProgress, '模型已就绪', { phase: 'ready', pct: 100 });
@@ -155,7 +163,8 @@ export async function textToImage(prompt, onProgress, options = {}) {
   if (!cleanPrompt) return null;
 
   await loadTextToImageModel(onProgress);
-  const promptEmbedding = options.presetId
+  // SDXS 的预置嵌入属于旧文本编码器，LCM 必须使用自己的编码器。
+  const promptEmbedding = MODEL_ID === 'sdxs-512-dreamshaper' && options.presetId
     ? await loadPresetEmbedding(options.presetId, onProgress)
     : null;
 
@@ -163,6 +172,7 @@ export async function textToImage(prompt, onProgress, options = {}) {
     {
       prompt: cleanPrompt,
       ...(promptEmbedding ? { promptEmbedding } : {}),
+      ...(MODEL_ID === 'lcm-tiny-sd' ? { steps: LCM_INFERENCE_STEPS } : {}),
       width: 512,
       height: 512,
       seed: Number.isInteger(options.seed)

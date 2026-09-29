@@ -311,7 +311,7 @@ class QwenSensorEnhancer:
         *,
         api_key: str | None = None,
         base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        model: str = "qwen3-vl-flash",
+        model: str = "qwen3.5-flash",
         retries: int = 2,
         timeout: float = 45.0,
         transport: Callable[
@@ -343,7 +343,7 @@ class QwenSensorEnhancer:
             fallback["source"] = {
                 **dict(fallback["source"]),
                 "generator": "rule-v1",
-                "enhancer": "qwen3-vl-flash",
+                "enhancer": "qwen3.5-flash",
                 "enhancement_status": "fallback_no_api_key",
             }
             return fallback

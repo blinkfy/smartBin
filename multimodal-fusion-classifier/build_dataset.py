@@ -133,7 +133,7 @@ def _parser() -> argparse.ArgumentParser:
         "--base-url",
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
-    parser.add_argument("--model", default="qwen3-vl-flash")
+    parser.add_argument("--model", default="qwen3.5-flash")
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument(
@@ -479,7 +479,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     dry_run = bool(getattr(args, "dry_run", False))
     resume = bool(getattr(args, "resume", False))
     output = Path(getattr(args, "output", DEFAULT_OUTPUT_DIR)).resolve()
-    model = str(getattr(args, "model", "qwen3-vl-flash"))
+    model = str(getattr(args, "model", "qwen3.5-flash"))
     api_key_env = str(getattr(args, "api_key_env", "DASHSCOPE_API_KEY"))
     workers = _coerce_int_arg(args, "workers", 4, minimum=1, maximum=32)
     progress_every = _coerce_int_arg(args, "progress_every", 10, minimum=1)

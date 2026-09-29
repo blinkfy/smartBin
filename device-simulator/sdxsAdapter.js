@@ -41,7 +41,7 @@ function buildSingleStepEulerSchedule() {
 
 const SINGLE_STEP_SCHEDULE = buildSingleStepEulerSchedule();
 
-function mulberry32(seed) {
+export function mulberry32(seed) {
   let value = seed >>> 0;
   return function random() {
     value += 0x6D2B79F5;
@@ -51,8 +51,7 @@ function mulberry32(seed) {
   };
 }
 
-function createNoise(shape, sigma, seed) {
-  const random = mulberry32(seed ?? 0);
+export function createNoise(shape, sigma, seed, random = mulberry32(seed ?? 0)) {
   const size = shape.reduce((product, value) => product * value, 1);
   const values = new Float32Array(size);
   for (let index = 0; index < size; index += 1) {
@@ -94,12 +93,12 @@ function normalizeProgress(progress, loaded, total, asset) {
   };
 }
 
-async function fetchPromptEmbedding(prompt, onProgress) {
+export async function fetchPromptEmbedding(prompt, onProgress, modelId = MODEL_ID) {
   onProgress?.({ phase: 'encoding', pct: 15, message: '正在编码自定义文本...' });
   const response = await fetch('/txt2img-embedding', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL_ID, prompt })
+    body: JSON.stringify({ model: modelId, prompt })
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -112,7 +111,7 @@ async function fetchPromptEmbedding(prompt, onProgress) {
   return embedding;
 }
 
-async function tensorToPngBlob(tensor) {
+export async function tensorToPngBlob(tensor) {
   const [, channels, height, width] = tensor.dims;
   if (channels !== 3) throw new Error(`VAE输出通道错误：${channels}`);
   const data = tensor.data;
@@ -138,6 +137,11 @@ async function tensorToPngBlob(tensor) {
 export class SDXSAdapter {
   constructor() {
     this.id = MODEL_ID;
+    this.displayName = 'SDXS单步';
+    this.modelAssets = {
+      unet: { url: 'unet/model.fp16.onnx', sizeMB: 658 },
+      vae_decoder: { url: 'vae_decoder/model.fp16.onnx', sizeMB: 3 }
+    };
     this.loaded = false;
     this.ort = null;
     this.sessions = {};
@@ -150,7 +154,7 @@ export class SDXSAdapter {
 
   async load(options) {
     if (!options.backendPreference.includes('webgpu')) {
-      return { ok: false, reason: 'backend_unavailable', message: 'SDXS FP16需要WebGPU' };
+      return { ok: false, reason: 'backend_unavailable', message: `${this.displayName} FP16需要WebGPU` };
     }
     if (options.modelBaseUrl) this.modelBase = options.modelBaseUrl;
 
@@ -162,11 +166,8 @@ export class SDXSAdapter {
       return { ok: false, reason: 'internal_error', message: `onnxruntime-web加载失败：${error.message || error}` };
     }
 
-    const models = {
-      unet: { url: 'unet/model.fp16.onnx', sizeMB: 658 },
-      vae_decoder: { url: 'vae_decoder/model.fp16.onnx', sizeMB: 3 }
-    };
-    const totalBytes = Object.values(models).reduce((sum, model) => sum + model.sizeMB * 1024 * 1024, 0);
+    const models = this.modelAssets;
+    const totalBytes = Object.values(models).reduce((sum, model) => sum + (model.sizeMB + (model.externalData?.sizeMB || 0)) * 1024 * 1024, 0);
     const progress = { loadedBytes: 0, totalBytes, expectedBytes: totalBytes };
     const sessionOptions = {
       executionProviders: ['webgpu'],
@@ -176,23 +177,34 @@ export class SDXSAdapter {
     };
 
     try {
-      options.onProgress?.({ phase: 'loading', message: '正在加载SDXS单步模型...', pct: 0, bytesDownloaded: 0, totalBytesExpected: totalBytes });
+      options.onProgress?.({ phase: 'loading', message: `正在加载${this.displayName}模型...`, pct: 0, bytesDownloaded: 0, totalBytesExpected: totalBytes });
       for (const [key, model] of Object.entries(models)) {
         const expectedBytes = model.sizeMB * 1024 * 1024;
         const buffer = await fetchArrayBufferWithCacheProgress(
-          `${this.modelBase}/${model.url}`,
+          model.url.startsWith('/') ? model.url : `${this.modelBase}/${model.url}`,
           this.id,
           (loaded, total) => options.onProgress?.(normalizeProgress(progress, loaded, total || expectedBytes, model.url)),
           expectedBytes
         );
         progress.loadedBytes += buffer.byteLength;
-        this.sessions[key] = await this.ort.InferenceSession.create(buffer, sessionOptions);
+        const externalData = [];
+        if (model.externalData) {
+          const asset = model.externalData;
+          const data = await fetchArrayBufferWithCacheProgress(
+            `${this.modelBase}/${asset.url}`, this.id,
+            (loaded, total) => options.onProgress?.(normalizeProgress(progress, loaded, total || asset.sizeMB * 1024 * 1024, asset.url)),
+            asset.sizeMB * 1024 * 1024
+          );
+          progress.loadedBytes += data.byteLength;
+          externalData.push({ path: asset.path, data: new Uint8Array(data) });
+        }
+        this.sessions[key] = await this.ort.InferenceSession.create(buffer, { ...sessionOptions, externalData });
       }
       this.loaded = true;
       return { ok: true, backendUsed: 'webgpu', bytesDownloaded: progress.loadedBytes };
     } catch (error) {
       await this.unload();
-      return { ok: false, reason: 'internal_error', message: `SDXS模型加载失败：${error.message || error}` };
+      return { ok: false, reason: 'internal_error', message: `${this.displayName}模型加载失败：${error.message || error}` };
     }
   }
 

@@ -133,7 +133,7 @@ def build_protocol(output_path: Path = DEFAULT_OUTPUT) -> dict[str, Any]:
                 "test": 570,
             },
             "mode": "qwen",
-            "model": "qwen3-vl-flash",
+            "model": "qwen3.5-flash",
             "api_key_environment_variable_name": "DASHSCOPE_API_KEY",
             "api_key_value_persisted": False,
             "output": "data/scene-qwen-sensor-sidecars",

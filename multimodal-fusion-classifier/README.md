@@ -16,7 +16,7 @@
 - 清单仅保存 `image_path + bbox`；训练时才读取并裁剪原图。
 - 默认用图像裁剪统计、目标框几何和稳定随机种子生成不读取真实标签的
   4×4 传感器数据。
-- 可选 Qwen3-VL-Flash：把目标框裁剪编码为 Base64 图像，通过
+- 可选 qwen3.5-flash：把目标框裁剪编码为 Base64 图像，通过
   OpenAI-compatible `chat/completions` 请求 JSON 传感器数据；支持校验、
   钳位、重试、断点续建和逐样本规则回退。
 - 当前分类网络只读取 sidecar 的 `normalized_grid`；五项属性标量保留作审计和
@@ -171,14 +171,14 @@ python evaluate_sensor_probe.py --split test `
 - `data/qwen-material/` 中没有图片副本。
 
 正式训练配置使用 `data/qwen-material/`，其样本数和切分与规则数据一致；
-其中 8,639 条为 Qwen3-VL-Flash 辅助估计，15 条因结构化输出不合法而使用
+其中 8,639 条为 qwen3.5-flash 辅助估计，15 条因结构化输出不合法而使用
 完整 rule-v1 回退，Qwen 覆盖率为 99.83%。
 
 这里的 8,654 是冻结清单记录数。对象身份审计发现其中 8 条为同源图、同类别、
 同 bbox 的完全重复记录，唯一对象裁剪数为 8,646；既有分类结果保留原 826 条
 test 协议并附 825 条唯一对象敏感性，YOLO-seg 训练出口则在训练前确定性去重。
 
-### 使用 Qwen3-VL-Flash 增强
+### 使用 qwen3.5-flash 增强
 
 先用单独输出目录做少量冒烟，避免覆盖完整规则清单：
 

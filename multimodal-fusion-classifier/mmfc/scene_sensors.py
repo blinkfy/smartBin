@@ -69,7 +69,7 @@ class QwenSceneSensorEnhancer:
         *,
         api_key: str | None = None,
         base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        model: str = "qwen3-vl-flash",
+        model: str = "qwen3.5-flash",
         retries: int = 2,
         timeout: float = 45.0,
         transport: Callable[

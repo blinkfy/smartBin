@@ -33,7 +33,7 @@ def test_scene_rule_sensor_is_full_image_and_annotation_free() -> None:
     assert first["source"]["annotation_inputs"] == []
     assert not contains_leakage_key(first)
     assert scene_record_usable(
-        first, mode="rule", qwen_model="qwen3-vl-flash"
+        first, mode="rule", qwen_model="qwen3.5-flash"
     )
 
 
@@ -69,7 +69,7 @@ def test_qwen_scene_request_uses_whole_image_and_no_target_prompt() -> None:
     ).enhance(_image(), rule)
 
     assert result["source"]["enhancement_status"] == "success"
-    assert result["source"]["generator"] == "qwen3-vl-flash"
+    assert result["source"]["generator"] == "qwen3.5-flash"
     content = calls[0]["messages"][0]["content"]
     assert content[0]["text"] == QWEN_SCENE_PROMPT
     assert content[1]["image_url"]["url"].startswith(
@@ -87,7 +87,7 @@ def _args(images_root: Path, output: Path, **overrides):
         "seed": 7,
         "api_key_env": "DASHSCOPE_API_KEY",
         "base_url": "https://example.invalid/v1",
-        "model": "qwen3-vl-flash",
+        "model": "qwen3.5-flash",
         "retries": 0,
         "timeout": 1.0,
         "workers": 2,

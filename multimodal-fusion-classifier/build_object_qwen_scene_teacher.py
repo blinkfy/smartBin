@@ -258,11 +258,11 @@ def build(output: Path = DEFAULT_OUTPUT) -> dict[str, Any]:
                 ],
                 "object_observation_count": len(objects),
                 "qwen_observation_count": generators.get(
-                    "qwen3-vl-flash", 0
+                    "qwen3.5-flash", 0
                 ),
                 "fallback_observation_count": (
                     len(objects)
-                    - generators.get("qwen3-vl-flash", 0)
+                    - generators.get("qwen3.5-flash", 0)
                 ),
                 "source": {
                     "generator": "object-qwen-scene-teacher-v1",

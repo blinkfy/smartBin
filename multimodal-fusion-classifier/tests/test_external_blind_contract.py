@@ -172,7 +172,7 @@ def _valid_bundle(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
                 },
                 "source": {
                     "mode": "qwen-soft-sensor",
-                    "generator": "qwen3-vl-flash",
+                    "generator": "qwen3.5-flash",
                     "annotation_inputs": False,
                     "class_inputs": False,
                 },

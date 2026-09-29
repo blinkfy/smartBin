@@ -161,7 +161,7 @@ def audit(output: Path = DEFAULT_OUTPUT) -> dict[str, Any]:
         errors.append(
             f"{leakage_record_count} sensor records contain leakage keys"
         )
-    qwen_success = generator_counts.get("qwen3-vl-flash", 0)
+    qwen_success = generator_counts.get("qwen3.5-flash", 0)
     fallback = len(sensors) - qwen_success
     if qwen_success != 8639 or fallback != 15:
         errors.append("Qwen/fallback coverage differs from frozen dataset")

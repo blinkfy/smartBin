@@ -35,7 +35,7 @@ DEFAULT_SERVER = "http://localhost:3000"#"https://rgqexbnzzipc.sealosbja.site"
 DEFAULT_FRONTEND = "http://localhost:3001"#"https://rgqexbnzzipc.sealosbja.site"  # 前端地址（二维码扫码后应跳转到前端）
 DEFAULT_INTERVAL = 15       # 秒
 DEFAULT_ROBOT_INTERVAL = 3  # 机器人进度与遥测刷新间隔（秒）
-DEFAULT_UI_PORT = 8000
+DEFAULT_UI_PORT = 8010
 DEFAULT_MODE = "bin"
 DEFAULT_COMMAND_INTERVAL = 1.0
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +47,9 @@ SORTING_ROBOT_ASSETS_DIR = os.path.join(SCRIPT_DIR, "assets", "sorting-robot")
 TEXT_TO_IMAGE_PRESETS_DIR = os.path.join(SCRIPT_DIR, "text-to-image-presets")
 SDXS_ADAPTER_FILENAME = os.path.join(SCRIPT_DIR, "sdxsAdapter.js")
 SDXS_MODEL_DIR = os.path.join(SCRIPT_DIR, "models", "sdxs-512-dreamshaper")
+LCM_ADAPTER_FILENAME = os.path.join(SCRIPT_DIR, "lcmTinyAdapter.js")
+LCM_MODEL_DIR = os.path.join(SCRIPT_DIR, "models", "lcm-tiny-sd")
+TEXT_TO_IMAGE_MODEL_DIRS = {"sdxs-512-dreamshaper": SDXS_MODEL_DIR, "lcm-tiny-sd": LCM_MODEL_DIR}
 NODE_MODULES_DIR = os.path.join(SCRIPT_DIR, "node_modules")
 ROBOT_IMAGE_FILENAME = os.path.join(SCRIPT_DIR, "images", "lejv.webp")
 BIN_IMAGE_FILENAME = os.path.join(SCRIPT_DIR, "images", "trash-bin-1757776021021.jpg")
@@ -394,7 +397,7 @@ class StatusHandler(BaseHTTPRequestHandler):
         if (
             relative_url.startswith("web-txt2img/")
             and file_path.endswith(".js")
-            and os.path.exists(file_path)
+            and (os.path.exists(file_path) or relative_url == "web-txt2img/dist/adapters/lcm-tiny-sd.js")
         ):
             try:
                 source_path = (
@@ -402,6 +405,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                     if relative_url == "web-txt2img/dist/adapters/sd-turbo.js"
                     else file_path
                 )
+                if relative_url == "web-txt2img/dist/adapters/lcm-tiny-sd.js":
+                    source_path = LCM_ADAPTER_FILENAME
                 with open(source_path, "r", encoding="utf-8") as file_handle:
                     data = file_handle.read()
                 data = data.replace(
@@ -453,17 +458,36 @@ class StatusHandler(BaseHTTPRequestHandler):
             if old not in data:
                 raise RuntimeError("web-txt2img 版本不兼容，无法注册SDXS模型")
             data = data.replace(old, new, 1)
+        data = "import { LCMTinyAdapter } from './adapters/lcm-tiny-sd.js';\n" + data
+        data = data.replace("const REGISTRY = [", """const REGISTRY = [
+    {
+        id: 'lcm-tiny-sd',
+        displayName: 'LCM-Tiny-SD (ONNX Runtime Web)',
+        task: 'text-to-image',
+        supportedBackends: ['webgpu'],
+        notes: 'LCM few-step; 512×512; seed supported.',
+        sizeBytesApprox: 621 * 1024 * 1024,
+        sizeGBApprox: 0.61,
+        sizeNotes: 'FP16 UNet; shared TAESD; server-side Text Encoder',
+        createAdapter: () => new LCMTinyAdapter(),
+    },""", 1)
+        data = data.replace("case 'sdxs-512-dreamshaper':", "case 'lcm-tiny-sd':\n        case 'sdxs-512-dreamshaper':", 1)
         return data
 
     def serve_txt2img_model(self, path):
-        prefix = "/txt2img-models/sdxs-512-dreamshaper/"
-        relative_url = unquote(path[len(prefix):])
+        prefix = "/txt2img-models/"
+        model_id, _, relative_url = unquote(path[len(prefix):]).partition("/")
+        model_dir = TEXT_TO_IMAGE_MODEL_DIRS.get(model_id)
+        if not model_dir:
+            self.send_response(404)
+            self.end_headers()
+            return
         if not relative_url or ".." in relative_url.split("/"):
             self.send_response(404)
             self.end_headers()
             return
-        file_path = os.path.abspath(os.path.join(SDXS_MODEL_DIR, *relative_url.split("/")))
-        model_root = os.path.abspath(SDXS_MODEL_DIR)
+        file_path = os.path.abspath(os.path.join(model_dir, *relative_url.split("/")))
+        model_root = os.path.abspath(model_dir)
         if not file_path.startswith(model_root + os.sep):
             self.send_response(404)
             self.end_headers()
@@ -496,6 +520,10 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.serve_module_file(TEXT_TO_IMAGE_FILENAME, "no-cache")
             return
 
+        if path == "/lcmScheduler.js":
+            self.serve_module_file(os.path.join(SCRIPT_DIR, "lcmScheduler.js"), "no-cache")
+            return
+
         if path == "/sorting-workflow-player.js":
             self.serve_module_file(SORTING_WORKFLOW_PLAYER_FILENAME, "no-cache")
             return
@@ -526,7 +554,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.serve_txt2img_preset(path)
             return
 
-        if path.startswith("/txt2img-models/sdxs-512-dreamshaper/"):
+        if path.startswith("/txt2img-models/"):
             self.serve_txt2img_model(path)
             return
 
@@ -660,11 +688,11 @@ class StatusHandler(BaseHTTPRequestHandler):
                 return
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                if payload.get("model") != "sdxs-512-dreamshaper":
+                if payload.get("model") not in TEXT_TO_IMAGE_MODEL_DIRS:
                     raise ValueError("不支持的文生图模型")
-                from sdxs_text_embedding import get_sdxs_prompt_embedding
+                from sdxs_text_embedding import get_text_to_image_prompt_embedding
 
-                embedding = get_sdxs_prompt_embedding(payload.get("prompt"))
+                embedding = get_text_to_image_prompt_embedding(payload.get("prompt"), payload["model"])
                 data = embedding.astype("float32", copy=False).tobytes(order="C")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
@@ -1681,7 +1709,7 @@ def main():
     parser.add_argument("--robot-interval", type=float, default=DEFAULT_ROBOT_INTERVAL, help="机器人进度与遥测刷新间隔（默认 3 秒）")
     parser.add_argument("--lat", type=float, default=36.06130, help="初始纬度")
     parser.add_argument("--lon", type=float, default=120.34600, help="初始经度")
-    parser.add_argument("--port", type=int, default=DEFAULT_UI_PORT, help="本地状态页端口 (默认 8000)")
+    parser.add_argument("--port", type=int, default=DEFAULT_UI_PORT, help="本地状态页端口 (默认 8010)")
     parser.add_argument("--frontend", default=DEFAULT_FRONTEND, help="前端基准 URL，用作二维码跳转地址 (默认 https://rgqexbnzzipc.sealosbja.site/)")
     parser.add_argument("--fill", type=float, default=45.0, help="初始满载率")
     parser.add_argument("--battery", type=float, default=88.0, help="初始电量百分比")

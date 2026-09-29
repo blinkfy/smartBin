@@ -1669,7 +1669,7 @@
               <div class="deposit-vision-header">
                 <strong>投放图生成与分类</strong>
                 <div class="deposit-vision-badges">
-                  <span class="deposit-vision-badge" id="textImageCaption">SDXS · WebGPU</span>
+                  <span class="deposit-vision-badge" id="textImageCaption">文生图 · WebGPU</span>
                   <span class="deposit-vision-badge">YOLO · 自定义启用</span>
                 </div>
               </div>
@@ -1683,7 +1683,7 @@
                   </div>
                   <textarea class="text-image-input" id="textImagePrompt" rows="2" maxlength="500" placeholder="输入待投放物描述" aria-label="投放图描述"></textarea>
                   <button class="text-image-button" id="textImageButton" type="button">生成投放图</button>
-                  <div class="text-image-status" id="textImageStatus" aria-live="polite">正在加载SDXS单步模型。</div>
+                  <div class="text-image-status" id="textImageStatus" aria-live="polite">正在加载文生图模型。</div>
                   <div class="progress-bar" aria-hidden="true"><div class="progress-fill" id="textImageProgressFill"></div></div>
                 </div>
                 <div class="deposit-preview-stack">
@@ -1767,7 +1767,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script type="module">
-    import { TEXT_TO_IMAGE_PRESETS, preloadTextToImageModel, textToImage, disposeTextToImage } from '/textToImage.js'
+    import { TEXT_TO_IMAGE_PRESETS, TEXT_TO_IMAGE_MODEL_LABEL, TEXT_TO_IMAGE_MODEL_DESCRIPTION, preloadTextToImageModel, textToImage, disposeTextToImage } from '/textToImage.js'
     import { mapSortingWorkflowStage } from '/sorting-workflow-player.js'
 
     const elements = {
@@ -1952,7 +1952,7 @@
 
     function resetGeneratedDepositImage() {
       cleanupTextImageUrl()
-      elements.textImageCaption.textContent = appState.textImageError ? '不可用' : 'SDXS · WebGPU'
+      elements.textImageCaption.textContent = appState.textImageError ? '不可用' : `${TEXT_TO_IMAGE_MODEL_LABEL} · WebGPU`
       appState.textImageBlob = null
       appState.recognition = null
       appState.recognitionConflict = false
@@ -1987,7 +1987,7 @@
       if (options.keepImage !== true) resetGeneratedDepositImage()
       if (appState.textImageReady && !appState.textImageGenerating) {
         setTextImageStatus(preset
-          ? '预置词嵌入已选中，可直接生成。'
+          ? '预置描述已选中，可直接生成。'
           : '自定义描述将由模拟器服务端的词嵌入模型编码。', { pct: preset ? 100 : 0 })
       }
       updateTextImageButton()
@@ -2002,7 +2002,7 @@
     }
 
     function handleTextImageLoadProgress(progress) {
-      const message = describeTextImageProgress(progress, '正在准备SDXS单步模型')
+      const message = describeTextImageProgress(progress, `正在准备${TEXT_TO_IMAGE_MODEL_DESCRIPTION}`)
       setTextImageStatus(message, { pct: progress.pct })
     }
 
@@ -2013,7 +2013,7 @@
       try {
         await preloadTextToImageModel(handleTextImageLoadProgress)
         appState.textImageReady = true
-        setTextImageStatus('SDXS单步模型已就绪；预置与自定义文本均可生成。', { pct: 100 })
+        setTextImageStatus(`${TEXT_TO_IMAGE_MODEL_DESCRIPTION}已就绪；预置与自定义文本均可生成。`, { pct: 100 })
       } catch (error) {
         appState.textImageError = error.message || '模型加载失败，请稍后重试'
         elements.textImageCaption.textContent = '不可用'
@@ -2155,7 +2155,7 @@
           await recognizeGeneratedImage(blob)
         }
       } catch (error) {
-        elements.textImageCaption.textContent = appState.textImageReady ? 'SDXS · WebGPU' : '不可用'
+        elements.textImageCaption.textContent = appState.textImageReady ? `${TEXT_TO_IMAGE_MODEL_LABEL} · WebGPU` : '不可用'
         setTextImageStatus(error.message || '图片生成失败，请稍后重试', { error: true })
       } finally {
         appState.textImageGenerating = false
