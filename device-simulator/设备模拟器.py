@@ -38,6 +38,7 @@ DEFAULT_ROBOT_INTERVAL = 3  # 机器人进度与遥测刷新间隔（秒）
 DEFAULT_UI_PORT = 8010
 DEFAULT_MODE = "bin"
 DEFAULT_COMMAND_INTERVAL = 1.0
+DEFAULT_WECHAT_ENV_VERSION = "release"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 QR_FILENAME = os.path.join(SCRIPT_DIR, "device_qr.png")
 UI_FILENAME = os.path.join(SCRIPT_DIR, "device-simulator-ui.html")
@@ -561,6 +562,12 @@ class StatusHandler(BaseHTTPRequestHandler):
         if path == "/qr":
             query = parse_qs(parsed.query)
             requested_revision = str((query.get("revision") or [""])[-1])
+            qr_type = str((query.get("type") or ["app"])[-1]).lower()
+            if qr_type not in ("app", "wechat"):
+                self.send_response(404)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
             bundle = (
                 self.connection_history.get(requested_revision)
                 if requested_revision
@@ -571,18 +578,19 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
-            qr_png = bundle.get("qr_png") or b""
-            if not qr_png:
+            qr_image = bundle.get("wechat_qr_png" if qr_type == "wechat" else "qr_png") or b""
+            if not qr_image:
                 self.send_response(404)
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
             self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(qr_png)))
+            content_type = bundle.get("wechat_qr_content_type") if qr_type == "wechat" else "image/png"
+            self.send_header("Content-Type", content_type or "image/png")
+            self.send_header("Content-Length", str(len(qr_image)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(qr_png)
+            self.wfile.write(qr_image)
             return
 
         if path == "/robot-image":
@@ -600,6 +608,9 @@ class StatusHandler(BaseHTTPRequestHandler):
                 "token": bundle.get("token") or "",
                 "scan_url": bundle.get("scan_url") or "",
                 "qr_revision": bundle.get("qr_revision") or 0,
+                "wechat_qr_revision": bundle.get("wechat_qr_revision") or "",
+                "wechat_qr_status": bundle.get("wechat_qr_status") or "pending",
+                "wechat_qr_error": bundle.get("wechat_qr_error") or "",
             })
             data = json.dumps(state_snapshot, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
@@ -717,7 +728,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
             return
 
-        if path in ("/mode", "/control", "/deposit", "/bin/reset"):
+        if path in ("/mode", "/control", "/deposit", "/bin/reset", "/wechat-qrcode/retry"):
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length) if length > 0 else b''
             content_type = self.headers.get('Content-Type', '')
@@ -741,6 +752,10 @@ class StatusHandler(BaseHTTPRequestHandler):
             try:
                 if path == "/mode":
                     result = simulator.set_mode(payload.get('mode'))
+                elif path == "/wechat-qrcode/retry":
+                    if not simulator.retry_wechat_qr():
+                        raise ValueError("设备 token 尚未准备好，无法重试微信码")
+                    result = {"status": "pending"}
                 elif path == "/deposit":
                     result = simulator.deposit_waste(payload)
                 elif path == "/bin/reset":
@@ -804,7 +819,8 @@ class DeviceSimulator:
                  mode=DEFAULT_MODE, command_interval=DEFAULT_COMMAND_INTERVAL,
                  auto_location=False, bin_device_id=DEFAULT_BIN_DEVICE_ID,
                  robot_device_id=DEFAULT_ROBOT_DEVICE_ID,
-                 robot_interval=DEFAULT_ROBOT_INTERVAL):
+                 robot_interval=DEFAULT_ROBOT_INTERVAL,
+                 wechat_env_version=DEFAULT_WECHAT_ENV_VERSION):
         self.server = server.rstrip("/")
         self.interval = interval
         self.robot_interval = max(1.0, float(robot_interval))
@@ -868,6 +884,9 @@ class DeviceSimulator:
                 "full": current_weight / capacity >= 0.85,
             }
         self._state_lock = threading.RLock()
+        if wechat_env_version not in ("release", "trial", "develop"):
+            raise ValueError("小程序环境版本必须是 release、trial 或 develop")
+        self.wechat_env_version = wechat_env_version
         # 前端基准地址（用于二维码）
         self.frontend = (frontend or DEFAULT_FRONTEND).rstrip("/")
         self._stop = threading.Event()
@@ -883,11 +902,19 @@ class DeviceSimulator:
         StatusHandler.simulator_state["token"] = ""
         StatusHandler.simulator_state["scan_url"] = ""
         StatusHandler.simulator_state["qr_revision"] = 0
+        StatusHandler.simulator_state["wechat_qr_revision"] = ""
+        StatusHandler.simulator_state["wechat_qr_status"] = "pending"
+        StatusHandler.simulator_state["wechat_qr_error"] = ""
         StatusHandler.connection_bundle = {
             "token": "",
             "scan_url": "",
             "qr_revision": 0,
             "qr_png": b"",
+            "wechat_qr_png": b"",
+            "wechat_qr_content_type": "",
+            "wechat_qr_revision": "",
+            "wechat_qr_status": "pending",
+            "wechat_qr_error": "",
         }
         StatusHandler.connection_history = {}
         StatusHandler.simulator_state["location_source"] = "fixed"
@@ -1308,12 +1335,20 @@ class DeviceSimulator:
                 "scan_url": scan_url,
                 "qr_revision": revision,
                 "qr_png": qr_png,
+                "wechat_qr_png": b"",
+                "wechat_qr_content_type": "",
+                "wechat_qr_revision": "",
+                "wechat_qr_status": "pending",
+                "wechat_qr_error": "",
             }
             self._current_token = active_token
             StatusHandler.simulator_state.update({
                 "token": active_token,
                 "scan_url": scan_url,
                 "qr_revision": revision,
+                "wechat_qr_revision": "",
+                "wechat_qr_status": "pending",
+                "wechat_qr_error": "",
             })
             StatusHandler.connection_bundle = bundle
             StatusHandler.connection_history[revision] = bundle
@@ -1321,8 +1356,112 @@ class DeviceSimulator:
                 oldest_revision = next(iter(StatusHandler.connection_history))
                 StatusHandler.connection_history.pop(oldest_revision, None)
 
-        print("生成二维码，内容：", scan_url)
+        print("普通 APP 连接二维码已生成；正在请求微信小程序码")
         return scan_url
+
+    def _start_wechat_qr_request(self, token):
+        """在线程中请求后端小程序码；网络请求不持有状态锁。"""
+        with self._state_lock:
+            bundle = StatusHandler.connection_bundle
+            if token != self._current_token or bundle.get("token") != token:
+                return None
+            revision = bundle.get("qr_revision")
+
+        def _fetch():
+            try:
+                response = requests.post(
+                    f"{self.server}/api/device/{self.device_id}/wechat-qrcode",
+                    json={"token": token, "env_version": self.wechat_env_version},
+                    timeout=30,
+                )
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                if response.status_code != 200 or content_type not in ("image/jpeg", "image/png"):
+                    try:
+                        error_body = response.json()
+                    except ValueError:
+                        error_body = {}
+                    message = str(error_body.get("msg") or f"HTTP {response.status_code}")
+                    raise RuntimeError(message)
+                if not response.content:
+                    raise RuntimeError("后端返回了空图片")
+
+                with self._state_lock:
+                    current = StatusHandler.connection_bundle
+                    if (
+                        token != self._current_token
+                        or current.get("token") != token
+                        or current.get("qr_revision") != revision
+                    ):
+                        return
+                    updated = dict(current)
+                    updated.update({
+                        "wechat_qr_png": response.content,
+                        "wechat_qr_content_type": content_type,
+                        "wechat_qr_revision": revision,
+                        "wechat_qr_status": "ready",
+                        "wechat_qr_error": "",
+                    })
+                    StatusHandler.connection_bundle = updated
+                    StatusHandler.connection_history[revision] = updated
+                    StatusHandler.simulator_state.update({
+                        "wechat_qr_revision": revision,
+                        "wechat_qr_status": "ready",
+                        "wechat_qr_error": "",
+                    })
+            except Exception as error:
+                with self._state_lock:
+                    current = StatusHandler.connection_bundle
+                    if (
+                        token != self._current_token
+                        or current.get("token") != token
+                        or current.get("qr_revision") != revision
+                    ):
+                        return
+                    updated = dict(current)
+                    updated.update({
+                        "wechat_qr_png": b"",
+                        "wechat_qr_content_type": "",
+                        "wechat_qr_revision": "",
+                        "wechat_qr_status": "error",
+                        "wechat_qr_error": str(error),
+                    })
+                    StatusHandler.connection_bundle = updated
+                    StatusHandler.connection_history[revision] = updated
+                    StatusHandler.simulator_state.update({
+                        "wechat_qr_revision": "",
+                        "wechat_qr_status": "error",
+                        "wechat_qr_error": str(error),
+                    })
+                print(f"[微信二维码] 生成失败，普通 APP 码仍可使用: {error}")
+
+        thread = threading.Thread(target=_fetch, daemon=True, name=f"wechat-qr-{self.device_id}")
+        thread.start()
+        return thread
+
+    def retry_wechat_qr(self):
+        """清除旧小程序码并重新异步请求当前 token 的图片。"""
+        with self._state_lock:
+            token = self._current_token
+            current = StatusHandler.connection_bundle
+            if not token or current.get("token") != token:
+                return False
+            revision = current.get("qr_revision")
+            updated = dict(current)
+            updated.update({
+                "wechat_qr_png": b"",
+                "wechat_qr_content_type": "",
+                "wechat_qr_revision": "",
+                "wechat_qr_status": "pending",
+                "wechat_qr_error": "",
+            })
+            StatusHandler.connection_bundle = updated
+            StatusHandler.connection_history[revision] = updated
+            StatusHandler.simulator_state.update({
+                "wechat_qr_revision": "",
+                "wechat_qr_status": "pending",
+                "wechat_qr_error": "",
+            })
+        return self._start_wechat_qr_request(token) is not None
 
     def start_ui_server(self):
         # 启动一个简单 HTTPServer 显示二维码与状态
@@ -1629,6 +1768,7 @@ class DeviceSimulator:
             if resp.status_code == 200 and response_body.get("code") == 0 and device_id == self.device_id:
                 backend_token = str(((response_body.get("data") or {}).get("token") or token)).strip()
                 self.generate_qr(backend_token)
+                self._start_wechat_qr_request(backend_token)
             else:
                 StatusHandler.simulator_state["token_sync_error"] = response_body.get("msg") or f"HTTP {resp.status_code}"
         except Exception as e:
@@ -1659,6 +1799,7 @@ class DeviceSimulator:
                     if r.status_code == 200 and response_body.get('code') == 0 and device_id == self.device_id:
                         backend_token = str(((response_body.get("data") or {}).get("token") or new_token)).strip()
                         self.generate_qr(backend_token)
+                        self._start_wechat_qr_request(backend_token)
                         print(f'[token] 设备刷新token: {new_token[:8]}... 并同步到后端')
                     else:
                         print(f'[token] 同步token到后端失败: {r.status_code} {r.text[:160]}')
@@ -1711,6 +1852,7 @@ def main():
     parser.add_argument("--lon", type=float, default=120.34600, help="初始经度")
     parser.add_argument("--port", type=int, default=DEFAULT_UI_PORT, help="本地状态页端口 (默认 8010)")
     parser.add_argument("--frontend", default=DEFAULT_FRONTEND, help="前端基准 URL，用作二维码跳转地址 (默认 https://rgqexbnzzipc.sealosbja.site/)")
+    parser.add_argument("--wechat-env", choices=("release", "trial", "develop"), default=DEFAULT_WECHAT_ENV_VERSION, help="微信小程序码对应环境版本")
     parser.add_argument("--fill", type=float, default=45.0, help="初始满载率")
     parser.add_argument("--battery", type=float, default=88.0, help="初始电量百分比")
     parser.add_argument("--weight", type=float, default=12.0, help="初始重量 kg")
@@ -1733,7 +1875,8 @@ def main():
                            auto_location=args.auto_location,
                            bin_device_id=args.bin_device_id,
                            robot_device_id=args.robot_device_id,
-                           robot_interval=args.robot_interval)
+                           robot_interval=args.robot_interval,
+                           wechat_env_version=args.wechat_env)
     sim.run()
 
 if __name__ == "__main__":

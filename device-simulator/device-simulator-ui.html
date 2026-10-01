@@ -624,6 +624,32 @@
       font-weight: 780;
     }
 
+    .qr-switch {
+      width: 100%;
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .qr-switch-button {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 4px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .qr-switch-button.active {
+      color: var(--green);
+      border-color: color-mix(in srgb, var(--green) 50%, var(--border));
+      background: color-mix(in srgb, var(--green) 8%, var(--surface));
+    }
+
     .qr-frame {
       width: 188px;
       aspect-ratio: 1;
@@ -641,9 +667,20 @@
     }
 
     .qr-hint {
-      margin: 10px 0 0;
+      margin: 2px 0 0;
       color: var(--muted);
       font-size: 11px;
+    }
+
+    .qr-status {
+      max-width: 250px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .qr-status.error {
+      color: var(--red);
     }
 
     .qr-refresh {
@@ -1652,8 +1689,14 @@
             </div>
             <div class="qr-area">
               <h2 class="qr-title">连接二维码</h2>
-              <div class="qr-frame"><img class="qr-image" id="qrImage" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="设备连接二维码"></div>
-              <p class="qr-hint">使用客户端“连接设备”扫描</p>
+              <div class="qr-switch" role="group" aria-label="选择二维码类型">
+                <button class="qr-switch-button active" id="appQrButton" type="button" aria-pressed="true">普通 APP</button>
+                <button class="qr-switch-button" id="wechatQrButton" type="button" aria-pressed="false">微信小程序</button>
+              </div>
+              <div class="qr-frame"><img class="qr-image" id="qrImage" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="普通 APP 设备连接二维码"></div>
+              <p class="qr-hint" id="qrHint">使用客户端“连接设备”扫描</p>
+              <p class="qr-status" id="wechatQrStatus" aria-live="polite">微信小程序码生成中；普通 APP 码可用。</p>
+              <button class="qr-refresh" id="retryWechatQrButton" type="button" hidden>重试微信小程序码</button>
               <button class="qr-refresh" id="refreshQrButton" type="button">↻ 刷新二维码</button>
             </div>
           </div>
@@ -1800,6 +1843,11 @@
       connectLink: document.getElementById('connectLink'),
       tokenValue: document.getElementById('tokenValue'),
       qrImage: document.getElementById('qrImage'),
+      qrHint: document.getElementById('qrHint'),
+      appQrButton: document.getElementById('appQrButton'),
+      wechatQrButton: document.getElementById('wechatQrButton'),
+      wechatQrStatus: document.getElementById('wechatQrStatus'),
+      retryWechatQrButton: document.getElementById('retryWechatQrButton'),
       refreshQrButton: document.getElementById('refreshQrButton'),
       controlsTitle: document.getElementById('controlsTitle'),
       controlState: document.getElementById('controlState'),
@@ -1840,6 +1888,9 @@
       statusFailures: 0,
       statusPollingStopped: false,
       qrRevision: '',
+      wechatQrRevision: '',
+      qrSelection: 'app',
+      qrSelectionManual: false,
       toastTimer: 0,
       selectedCategory: 'recyclable',
       categoryItems: {},
@@ -2369,7 +2420,27 @@
       })
     }
 
+    function updateQrSelection(kind, manual = false, cacheBust = '') {
+      appState.qrSelection = kind
+      appState.qrSelectionManual = manual
+      const isWechat = kind === 'wechat'
+      elements.appQrButton.classList.toggle('active', !isWechat)
+      elements.appQrButton.setAttribute('aria-pressed', String(!isWechat))
+      elements.wechatQrButton.classList.toggle('active', isWechat)
+      elements.wechatQrButton.setAttribute('aria-pressed', String(isWechat))
+      elements.qrImage.alt = isWechat ? '微信小程序设备连接码' : '普通 APP 设备连接二维码'
+      elements.qrHint.textContent = isWechat ? '微信扫一扫' : '使用客户端“连接设备”扫描'
+      const status = appState.status || {}
+      const revision = isWechat
+        ? String(status.wechat_qr_revision || '')
+        : String(status.qr_revision || '')
+      elements.qrImage.src = revision
+        ? `/qr?type=${isWechat ? 'wechat' : 'app'}&revision=${encodeURIComponent(revision)}${cacheBust}`
+        : 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+    }
+
     function renderStatus(status) {
+      const previousStatus = appState.status
       appState.status = status
       const mode = status.mode === 'robot' ? 'robot' : 'bin'
       const telemetry = status.telemetry || {}
@@ -2406,8 +2477,32 @@
       const qrRevision = String(status.qr_revision || '')
       if (qrRevision && qrRevision !== appState.qrRevision) {
         appState.qrRevision = qrRevision
-        elements.qrImage.src = `/qr?revision=${encodeURIComponent(qrRevision)}`
+        appState.wechatQrRevision = ''
+        updateQrSelection('app')
       }
+      const wechatQrRevision = String(status.wechat_qr_revision || '')
+      if (wechatQrRevision && wechatQrRevision !== appState.wechatQrRevision) {
+        appState.wechatQrRevision = wechatQrRevision
+        if (!appState.qrSelectionManual) updateQrSelection('wechat')
+      }
+      const wechatQrStatus = String(status.wechat_qr_status || 'pending')
+      const wechatQrError = String(status.wechat_qr_error || '').trim()
+      if (
+        wechatQrStatus === 'pending'
+        && previousStatus
+        && previousStatus.wechat_qr_status !== 'pending'
+      ) {
+        appState.wechatQrRevision = ''
+        if (appState.qrSelection === 'wechat') updateQrSelection('app')
+      }
+      elements.wechatQrStatus.classList.toggle('error', wechatQrStatus === 'error')
+      elements.wechatQrStatus.textContent = wechatQrStatus === 'ready'
+        ? '微信小程序码已就绪。'
+        : wechatQrStatus === 'error'
+          ? `微信小程序码不可用${wechatQrError ? `：${wechatQrError}` : ''}。请使用普通 APP 码扫码。`
+          : '微信小程序码生成中；普通 APP 码可用。'
+      elements.retryWechatQrButton.hidden = wechatQrStatus !== 'error'
+      if (wechatQrStatus === 'error' && appState.qrSelection === 'wechat') updateQrSelection('app')
       elements.robotState.textContent = stateLabels[robotStatus] || robotStatus
       elements.robotPhase.textContent = phase
       elements.summaryState.textContent = mode === 'robot' && robotStatus === 'emergency_stopped' ? '设备已急停' : '设备在线'
@@ -2542,8 +2637,6 @@
       try {
         await postJson('/mode', { mode })
         await fetchStatus()
-        const revision = String((appState.status && appState.status.qr_revision) || '')
-        if (revision) elements.qrImage.src = `/qr?revision=${encodeURIComponent(revision)}`
         showToast(mode === 'robot' ? '已切换为虚拟机器人' : '已切换为垃圾桶设备')
       } catch (error) {
         showToast(error.message)
@@ -2644,13 +2737,29 @@
     })
     elements.binModeButton.addEventListener('click', () => switchMode('bin'))
     elements.robotModeButton.addEventListener('click', () => switchMode('robot'))
+    elements.appQrButton.addEventListener('click', () => updateQrSelection('app', true))
+    elements.wechatQrButton.addEventListener('click', () => updateQrSelection('wechat', true))
+    elements.retryWechatQrButton.addEventListener('click', async () => {
+      elements.retryWechatQrButton.disabled = true
+      appState.wechatQrRevision = ''
+      updateQrSelection('app')
+      try {
+        await postJson('/wechat-qrcode/retry', {})
+        await fetchStatus()
+        showToast('正在重新生成微信小程序码')
+      } catch (error) {
+        showToast(error.message)
+      } finally {
+        elements.retryWechatQrButton.disabled = false
+      }
+    })
     elements.refreshQrButton.addEventListener('click', () => {
       const revision = String((appState.status && appState.status.qr_revision) || '')
       if (!revision) {
         showToast('二维码尚未生成')
         return
       }
-      elements.qrImage.src = `/qr?revision=${encodeURIComponent(revision)}&t=${Date.now()}`
+      updateQrSelection(appState.qrSelection, appState.qrSelectionManual, `&t=${Date.now()}`)
       showToast('二维码已刷新')
     })
     document.querySelectorAll('[data-category]').forEach(button => {
